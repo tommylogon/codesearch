@@ -29,7 +29,7 @@ Most code-search tools for AI coding assistants are either:
 ### 1. Installation
 
 ```bash
-git clone https://github.com/your-username/codesearch.git
+git clone https://github.com/tommylogon/codesearch.git
 cd codesearch
 pip install -e .
 ```
@@ -77,6 +77,35 @@ codesearch outline src/server.py
 codesearch serve --port 5003
 ```
 Open `http://localhost:5003` to explore code visually with an interactive search bar and canvas graph.
+
+---
+
+## Local Embeddings (Recommended Setup)
+
+By default, `codesearch-mcp` delivers fast lexical BM25 ranking. For semantic conceptual search, it supports local OpenAI-compatible embedding endpoints with automatic dimension detection and cosine vector fusion.
+
+### Tested and Recommended Configuration
+
+- **Model:** Qwen Embedding (e.g. `text-embedding-qwen` / `Qwen2-Embedding`)
+- **Dimensions:** 1024 vectors
+- **Context Window:** 32k context length (allows indexing large functions, multi-turn transcripts, and full document sections without truncation)
+- **Local Server:** LM Studio (port 1234) or Ollama (port 11434)
+
+### Running the Embedder
+
+Load your embedding model into LM Studio or Ollama, then run:
+
+```bash
+# Embed up to 5,000 pending snippets via LM Studio (default: http://localhost:1234/v1/embeddings)
+codesearch embed --limit 5000
+
+# Or point to Ollama with custom dimensions
+CODESEARCH_EMBED_ENDPOINT="http://localhost:11434/v1/embeddings" \
+CODESEARCH_EMBED_MODEL="qwen2-embedding" \
+codesearch embed --limit 5000
+```
+
+The embedder handles exponential backoff, batch splitting, and incremental vector storage directly in `.codesearch/codesearch.db`.
 
 ---
 
@@ -144,23 +173,6 @@ Add to your `.gemini/antigravity.json` or workspace settings:
     }
   }
 }
-```
-
----
-
-## Local Embeddings (Optional)
-
-By default, `codesearch-mcp` provides fast, accurate lexical BM25 ranking. To enable vector search:
-
-1. Launch your local model runner (LM Studio or Ollama) with an embedding model (e.g. `text-embedding-nomic-embed-text-v1.5` or `bge-small-en-v1.5`).
-2. Run the embedder:
-
-```bash
-# Embed up to 5,000 pending snippets using LM Studio (default: http://localhost:1234/v1)
-codesearch embed --limit 5000
-
-# Or point to Ollama / OpenAI
-CODESEARCH_EMBED_URL="http://localhost:11434/v1/embeddings" CODESEARCH_EMBED_MODEL="nomic-embed-text" codesearch embed
 ```
 
 ---
