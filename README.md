@@ -86,7 +86,7 @@ By default, `codesearch-mcp` delivers fast lexical BM25 ranking. For semantic co
 
 ### Tested and Recommended Configuration
 
-- **Model:** Qwen Embedding (e.g. `text-embedding-qwen` / `Qwen2-Embedding`)
+- **Model:** text-embedding-qwen3-embedding-0.6b
 - **Dimensions:** 1024 vectors
 - **Context Window:** 32k context length (allows indexing large functions, multi-turn transcripts, and full document sections without truncation)
 - **Local Server:** LM Studio (port 1234) or Ollama (port 11434)
@@ -101,7 +101,7 @@ codesearch embed --limit 5000
 
 # Or point to Ollama with custom dimensions
 CODESEARCH_EMBED_ENDPOINT="http://localhost:11434/v1/embeddings" \
-CODESEARCH_EMBED_MODEL="qwen2-embedding" \
+CODESEARCH_EMBED_MODEL="text-embedding-qwen3-embedding-0.6b" \
 codesearch embed --limit 5000
 ```
 
