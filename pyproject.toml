@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "codesearch-mcp"
+version = "0.1.0"
+description = "Lightning-fast, local-first hybrid code and doc search engine for AI agents with AST call-graphs, SQLite FTS5, and FastMCP."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "VirtualWorld Contributors" }
+]
+keywords = [
+    "mcp",
+    "model-context-protocol",
+    "code-search",
+    "agentic-ai",
+    "ast",
+    "sqlite",
+    "fastmcp",
+    "vector-search",
+    "local-first"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence"
+]
+dependencies = [
+    "fastmcp>=0.1.0",
+    "flask>=2.0.0",
+    "pillow>=9.0.0",
+    "numpy>=1.20.0",
+    "requests>=2.25.0"
+]
+
+[project.scripts]
+codesearch = "codesearch.cli:main"
+codesearch-mcp = "codesearch.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/codesearch"]

@@ -1,0 +1,26 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# Codesearch local data
+.codesearch/
+
+# Node / JS
+node_modules/
+package-lock.json
+
+# Environment / IDE
+.env
+.venv
+env/
+venv/
+.vscode/
+.idea/
+*.swp

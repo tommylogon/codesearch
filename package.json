@@ -1,0 +1,9 @@
+{
+  "name": "codesearch-mcp",
+  "version": "0.1.0",
+  "description": "JS/TS parser bridge for codesearch",
+  "type": "module",
+  "dependencies": {
+    "acorn": "^8.14.0"
+  }
+}
