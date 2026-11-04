@@ -26,6 +26,8 @@ KIND_COLOR = {
     "section": "#f2994a",
     "block": "#56ccf2",
     "element": "#eb5757",
+    "record": "#9b8afb",
+    "tag": "#7f8c9b",
 }
 
 EDGE_COLOR = {
@@ -36,6 +38,7 @@ EDGE_COLOR = {
     "INHERITS": "#f2c94c",
     "ANNOTATES": "#8b93a1",
     "LINKS_TO": "#f2994a",
+    "CONNECTS_TO": "#56ccf2",
 }
 
 

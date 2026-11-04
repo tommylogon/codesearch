@@ -12,12 +12,13 @@ import posixpath
 import sqlite3
 import time
 from collections import defaultdict
+from fnmatch import fnmatch
 from pathlib import Path
 
 from . import config, db, embedder
 from .parsers import html_parser, js_bridge, json_parser, md_parser, py_parser
 
-RESOLVED_KINDS = ("CALLS", "REFERENCES", "IMPORTS", "INHERITS", "LINKS_TO")
+RESOLVED_KINDS = ("CALLS", "REFERENCES", "IMPORTS", "INHERITS", "LINKS_TO", "CONNECTS_TO")
 JS_BATCH = 150
 BUILTIN_ATTR_CALLS = {
     "get", "set", "has", "add", "delete", "clear", "keys", "values", "entries", "items",
@@ -52,6 +53,9 @@ def scan(root: Path) -> tuple[list[dict], dict]:
             rel = fn if rel_dir == "." else f"{rel_dir}/{fn}"
             if rel.startswith(config.IGNORE_PREFIXES) or fn in config.IGNORE_FILES:
                 skipped["vendored"] += 1
+                continue
+            if any(fnmatch(fn, pat) for pat in config.IGNORE_FILE_PATTERNS):
+                skipped["generated_index"] += 1
                 continue
             if fn.endswith(".d.ts"):
                 skipped["declaration"] += 1
@@ -131,6 +135,9 @@ def _parse_files(changed: list[dict]) -> tuple[dict[str, dict], list[str]]:
                     continue
                 base["nodes"].extend(res["nodes"])
                 base["refs"].extend(res["refs"])
+    for rel, res in parsed.items():
+        for msg in res.get("problems", []):
+            problems.append(f"{rel}: {msg}")
     return parsed, problems
 
 
@@ -249,6 +256,17 @@ def resolve(conn: sqlite3.Connection) -> dict:
         by_qname[r["qualified_name"]] = r["id"]
         if r["kind"] in ("function", "method", "class", "variable"):
             by_name[r["name"]].append((r["id"], r["file_id"], r["kind"], r["parent_id"]))
+
+    # JSON records are link targets: a `target`/`way_id`/`area_from` value names a record
+    # in the same file. Index them by display name and by the last segment of their path.
+    record_by_file: dict[int, dict[str, list[int]]] = defaultdict(lambda: defaultdict(list))
+    for r in conn.execute("SELECT id, file_id, name, qualified_name FROM nodes WHERE kind = 'record'"):
+        keys = {r["name"].strip().lower()}
+        tail = r["qualified_name"].split("::", 1)[-1].rsplit("::", 1)[-1]
+        keys.add(tail.strip().lower())
+        for k in keys:
+            if k:
+                record_by_file[r["file_id"]][k].append(r["id"])
 
     out: list[tuple] = []
     counts: dict[str, int] = defaultdict(int)
@@ -421,6 +439,10 @@ def resolve(conn: sqlite3.Connection) -> dict:
                     t = file_by_rel.get(sibling)
                 if t is not None:
                     emit(src, file_node[t], "LINKS_TO")
+        elif kind == "CONNECTS_TO":
+            key = r["target"].strip().lower()
+            for c in record_by_file.get(src_file, {}).get(key, [])[:config.MAX_AMBIGUOUS_TARGETS]:
+                emit(src, c, "CONNECTS_TO", r["qualifier"])
 
     conn.executemany("INSERT OR IGNORE INTO edges(source_id, target_id, kind, meta) VALUES (?,?,?,?)", out)
     return dict(counts)

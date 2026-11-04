@@ -79,9 +79,10 @@
 <script src="/vendor/vis-network.js"></script>
 <script>
 const KIND_COLOR = {file:'#4da3ff', class:'#f2c94c', function:'#6fcf97', method:'#27ae60', variable:'#bb86fc',
-                    comment:'#8b93a1', section:'#f2994a', block:'#56ccf2', element:'#eb5757'};
+                    comment:'#8b93a1', section:'#f2994a', block:'#56ccf2', element:'#eb5757',
+                    record:'#9b8afb', tag:'#7f8c9b'};
 const EDGE_COLOR = {DEFINES:'#4b5563', CALLS:'#6fcf97', REFERENCES:'#bb86fc', IMPORTS:'#4da3ff',
-                    INHERITS:'#f2c94c', ANNOTATES:'#8b93a1', LINKS_TO:'#f2994a'};
+                    INHERITS:'#f2c94c', ANNOTATES:'#8b93a1', LINKS_TO:'#f2994a', CONNECTS_TO:'#56ccf2'};
 const state = {kinds:new Set(), langs:new Set(), part:'', any:false, strict:false, depth:1, current:null, nodes:null, edges:null, network:null};
 
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
@@ -92,7 +93,7 @@ function chips(container, items, onToggle, single) {
     const c = el('span', 'chip', it); c.onclick = () => { onToggle(it, c); }; container.appendChild(c);
   });
 }
-chips($('kinds'), ['file','class','function','method','variable','comment','section','block'], (k, c) => {
+chips($('kinds'), ['file','class','function','method','variable','comment','section','block','record','tag'], (k, c) => {
   state.kinds.has(k) ? state.kinds.delete(k) : state.kinds.add(k); c.classList.toggle('on'); search(); });
 chips($('langs'), ['python','typescript','javascript','markdown','json','html','text'], (k, c) => {
   state.langs.has(k) ? state.langs.delete(k) : state.langs.add(k); c.classList.toggle('on'); search(); });

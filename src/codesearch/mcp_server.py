@@ -32,7 +32,7 @@ Best practices:
    - Use `part='function_name'` or `part='function'` for code definitions and signatures.
    - Use `part='filename'` to find files by path or module topic.
    - Set `match_all=False` when passing several alternative keywords, or `strict=True` to require exact keyword matches.
-   - Filter by `language` ('python', 'typescript', 'javascript', 'markdown', 'json', 'html', 'text') or `kind` ('file', 'class', 'function', 'method', 'variable', 'comment', 'section', 'block').
+   - Filter by `language` ('python', 'typescript', 'javascript', 'markdown', 'json', 'html', 'text') or `kind` ('file', 'class', 'function', 'method', 'variable', 'comment', 'section', 'block', 'record', 'tag').
 2. Every `search_code` hit already includes its 1-hop graph relations (`called_by`, `calls`, `referenced_by`, `reads`, `writes`).
 3. Use `code_neighbors(symbol=..., direction='both', depth=1)` to walk callers/callees, or `find_references(symbol=...)` to see all read (`[r]`) and write (`[w]`) sites for a variable/attribute.
 4. Use `file_outline(path=...)` to inspect a file's structure before reading lines with `get_code(path=..., start=..., end=...)`.
@@ -77,7 +77,7 @@ def search_code(query: str, part: str | None = None, kind: str | None = None,
                 match_all: bool = True, strict: bool = False, limit: int = 8) -> dict:
     """Hybrid search over code, comments and docs: every-word keyword match OR semantic
     match of the whole sentence, fused by rank. part: filename|function_name|function|comment
-    narrows to one vector index. kind: file|class|function|method|variable|comment|section|block.
+    narrows to one vector index. kind: file|class|function|method|variable|comment|section|block|record|tag.
     language: python|typescript|javascript|markdown|html|text. path: repo-relative prefix.
     strict=true keeps only keyword matches. Each result lists callers/callees/references."""
     conn, searcher = _db()
@@ -182,7 +182,7 @@ def _resolve_node_id(conn, token: str | int) -> int | None:
         nid = int(s)
         if graph.get_node(conn, nid):
             return nid
-    found = graph.find_symbol(conn, s, kinds=("file", "class", "function", "method", "variable", "section"))
+    found = graph.find_symbol(conn, s, kinds=("file", "class", "function", "method", "variable", "section", "record"))
     return found[0]["id"] if found else None
 
 

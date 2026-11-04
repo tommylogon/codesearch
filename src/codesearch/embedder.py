@@ -45,6 +45,10 @@ def part_texts(node: sqlite3.Row) -> dict[str, str]:
     if kind == "comment":
         out["comment"] = doc
         return out
+    if kind in ("record", "tag"):
+        # Keyword-only kinds. A record's docstring is a bag of field names and a tag is a
+        # one-word label: giving either a vector lets it outrank real prose.
+        return out
     if kind in ("function", "method", "class", "variable", "element"):
         local = qname.split("::", 1)[1] if "::" in qname else name
         out["function_name"] = f"{local} {split_words(local)}".strip()
@@ -87,13 +91,13 @@ def embed_texts(texts: list[str], timeout: int | None = None) -> np.ndarray:
 
 
 def embed_query(query: str) -> np.ndarray:
-    text = f"Instruct: {config.EMBED_QUERY_INSTRUCTION}\nQuery: {query}"
-    return embed_texts([text], timeout=10)[0]
+    text = f"{query}"
+    return embed_texts([text], timeout=300)[0]
 
 
 def preflight() -> None:
     try:
-        r = requests.get(f"{config.EMBED_ENDPOINT.rstrip('/')}/models", timeout=10)
+        r = requests.get(f"{config.EMBED_ENDPOINT.rstrip('/')}/models", timeout=300)
         r.raise_for_status()
     except requests.RequestException as exc:
         raise RuntimeError(f"embedding endpoint {config.EMBED_ENDPOINT} unreachable: {exc}") from exc

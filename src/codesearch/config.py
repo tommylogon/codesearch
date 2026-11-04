@@ -48,6 +48,9 @@ IGNORE_FILES = {
     "package-lock.json", ".live_state.json", "autosave.json", "sandbox_autosave.json",
     "embeddings.json", ".tasks-index.json",
 }
+# Generated manifests: a file that points at other files and repeats their content.
+# Indexed once as a manifest, not once per repeated copy. fnmatch on the file name.
+IGNORE_FILE_PATTERNS = ("character_index.json", "index.json")
 
 # A .js file sitting next to a .ts file with the same stem is compiled output.
 SKIP_JS_WITH_TS_SIBLING = True
@@ -55,18 +58,22 @@ SKIP_JS_WITH_TS_SIBLING = True
 # Size caps in BYTES; set to None to disable the cap entirely.
 MAX_FILE_BYTES = 100_000_000
 MAX_JSON_BYTES = 100_000_000
+# A JSON document is walked key by key, one row per key path. These bound the work per
+# document. When a bound is hit the parser reports it; nothing is silently dropped.
+MAX_JSON_NODES = 50_000
+MAX_JSON_DEPTH = 64
 
 # Embedding endpoint (LM Studio, OpenAI compatible).
 EMBED_ENDPOINT = os.environ.get("CODESEARCH_EMBED_ENDPOINT",
                                 os.environ.get("LM_STUDIO_ENDPOINT", "http://localhost:1234/v1"))
 EMBED_MODEL = os.environ.get("CODESEARCH_EMBED_MODEL", "text-embedding-qwen3-embedding-0.6b")
-EMBED_QUERY_INSTRUCTION = "Given a code search query, retrieve relevant code, comments and documentation"
+EMBED_QUERY_INSTRUCTION = ""
 EMBED_BATCH = 32
 EMBED_WORKERS = 4
 # The embedding model has a finite context window. This bounds the text SENT TO THE
 # MODEL only; the full text stays in the database and is what the UI and CLI show.
-EMBED_MAX_CHARS = 2000
-EMBED_TIMEOUT = 120
+EMBED_MAX_CHARS = 32000
+EMBED_TIMEOUT = 320
 
 # The four vector indexes, each answering a different question.
 PARTS = ("filename", "function_name", "function", "comment")

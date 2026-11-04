@@ -1,6 +1,6 @@
 """codesearch command line.
 
-    python tools/codesearch/cli.py index [--force]
+    python tools/codesearch/cli.py index [--force] [--no-embed] [--embed-limit N]
     python tools/codesearch/cli.py embed [--limit N]
     python tools/codesearch/cli.py "turn queue initiative"          (search is the default)
     python tools/codesearch/cli.py search "..." --part comment --kind function --any
@@ -27,9 +27,9 @@ from codesearch.search import Searcher                      # noqa: E402
 
 COMMANDS = {"index", "embed", "search", "callers", "callees", "refs", "outline", "render", "stats", "serve", "mcp"}
 KIND_ALIASES = {"func": "function", "fn": "function", "var": "variable", "doc": "section",
-                "file": "file", "method": "method", "class": "class", "comment": "comment",
-                "section": "section", "block": "block", "function": "function", "variable": "variable",
-                "element": "element"}
+                 "file": "file", "method": "method", "class": "class", "comment": "comment",
+                 "section": "section", "block": "block", "function": "function", "variable": "variable",
+                 "element": "element", "record": "record", "tag": "tag"}
 
 
 def _print_hit(i: int, h: dict, full: bool, preview_lines: int) -> None:
@@ -134,7 +134,7 @@ def _resolve_id_or_symbol(conn, token: str) -> int | None:
         nid = int(s)
         if graph.get_node(conn, nid):
             return nid
-    found = graph.find_symbol(conn, s, kinds=("file", "class", "function", "method", "variable", "section"))
+    found = graph.find_symbol(conn, s, kinds=("file", "class", "function", "method", "variable", "section", "record"))
     return found[0]["id"] if found else None
 
 
@@ -194,7 +194,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("query", nargs="+")
     s.add_argument("-n", "--limit", type=int, default=10)
     s.add_argument("--part", choices=config.PARTS, help="search one vector index only")
-    s.add_argument("--kind", action="append", help="file|class|function|method|variable|comment|section|block (repeatable)")
+    s.add_argument("--kind", action="append", help="file|class|function|method|variable|comment|section|block|record|tag (repeatable)")
     s.add_argument("--lang", action="append", help="python|typescript|javascript|markdown|html|text (repeatable)")
     s.add_argument("--path", help="repo-relative path prefix")
     s.add_argument("--any", action="store_true", help="keyword list matches ANY word instead of all")
@@ -205,8 +205,12 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--preview", type=int, default=4, help="docstring lines shown per result")
     s.add_argument("--json", action="store_true")
 
-    i = sub.add_parser("index", help="scan the repo and update the graph")
+    i = sub.add_parser("index", help="scan the repo, update the graph, then embed new text")
     i.add_argument("--force", action="store_true", help="re-parse every file")
+    i.add_argument("--embed", action=argparse.BooleanOptionalAction, default=True,
+                   help="embed new or changed text after indexing (default: on; use --no-embed to skip)")
+    i.add_argument("--embed-limit", type=int,
+                   help="embed at most N new texts after indexing (default: all)")
     e = sub.add_parser("embed", help="embed new or changed text into the four vector indexes")
     e.add_argument("--limit", type=int, help="embed at most N new texts")
     e.add_argument("--path", help="repo-relative path prefix to embed first")
@@ -247,6 +251,14 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({k: v for k, v in res.items() if k != "problems"}))
             for prob in res["problems"]:
                 print("parse problem:", prob)
+            if args.embed:
+                from codesearch import embedder
+                try:
+                    embedder.preflight()
+                except RuntimeError as exc:
+                    print("embed skipped:", exc, file=sys.stderr)
+                else:
+                    print(json.dumps(embedder.build(conn, limit=args.embed_limit)), flush=True)
             return 0
         if args.cmd == "embed":
             from codesearch import embedder

@@ -6,7 +6,7 @@ Portable connection and usage guide for connecting any LLM coding agent, IDE, or
 
 ## 1. Connecting the MCP Server (`stdio`)
 
-`codesearch` runs a local `FastMCP` server over `stdio` at `F:/AI/viwo/virtual-world/tools/codesearch/mcp_server.py` (or `F:/AI/viwo/virtual-world/tools/codesearch.py mcp`).
+`codesearch` runs a local `FastMCP` server over `stdio` at `F:/AI/codesearch/src/codesearch/mcp_server.py` (or `F:/AI/codesearch/src/codesearch/cli.py mcp`).
 
 Add one or more entries to your client's `mcpServers` JSON configuration:
 
@@ -17,7 +17,7 @@ Add one or more entries to your client's `mcpServers` JSON configuration:
     "codesearch": {
       "command": "python",
       "args": [
-        "F:/AI/viwo/virtual-world/tools/codesearch.py",
+        "F:/AI/codesearch/src/codesearch/cli.py",
         "mcp"
       ],
       "env": {
@@ -39,7 +39,7 @@ Pass `--root <folder>` in `args` (or `CODESEARCH_ROOT` in `env`). Each folder us
     "millwood-search": {
       "command": "python",
       "args": [
-        "F:/AI/viwo/virtual-world/tools/codesearch.py",
+        "F:/AI/codesearch/src/codesearch/cli.py",
         "--root",
         "C:/Users/Tommy/Documents/Books/millwood",
         "mcp"
@@ -94,13 +94,13 @@ Prefer `codesearch` over blind `grep` loops or reading entire large files. `code
   - Check index health, file/node/edge counts, and vector coverage.
 
 ### CLI Fallback (if MCP is unavailable in a shell-only agent)
-Run `python F:/AI/viwo/virtual-world/tools/codesearch.py` (add `-r <folder>` to target another workspace):
-- `python tools/codesearch.py "<query>" [--part comment] [--kind method] [--lang python] [--path engine] [--any] [--strict] [--full]`
-- `python tools/codesearch.py callers "<symbol>"`
-- `python tools/codesearch.py callees "<symbol>"`
-- `python tools/codesearch.py refs "<symbol>"`
-- `python tools/codesearch.py outline <rel_path>`
-- `python tools/codesearch.py render "<symbol_or_#id>" --expand "<#id1,#id2>"`
-- `python tools/codesearch.py index` (incremental update after editing files)
-- `python tools/codesearch.py embed` (embed new/changed nodes via LM Studio)
+Run `python F:/AI/codesearch/src/codesearch/cli.py` (or `python -m codesearch`, add `-r <folder>` to target another workspace):
+- `python -m codesearch "<query>" [--part comment] [--kind method] [--lang python] [--path engine] [--any] [--strict] [--full]`
+- `python -m codesearch callers "<symbol>"`
+- `python -m codesearch callees "<symbol>"`
+- `python -m codesearch refs "<symbol>"`
+- `python -m codesearch outline <rel_path>`
+- `python -m codesearch render "<symbol_or_#id>" --expand "<#id1,#id2>"`
+- `python -m codesearch index` (incremental update after editing files)
+- `python -m codesearch embed` (embed new/changed nodes via LM Studio)
 ```
