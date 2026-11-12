@@ -351,4 +351,22 @@ def test_external_prose_root_and_overview_fallback(tmp_path):
         config.set_root(prev_root)
 
 
+def test_markdown_section_symbol_and_wikilink_references(repo):
+    root, conn, _ = repo
+    (root / "wiki").mkdir(exist_ok=True)
+    (root / "wiki" / "spells.md").write_text("# Spells\n\n## Florum\n\nConjures a living rose.\n", encoding="utf-8")
+    (root / "scenes").mkdir(exist_ok=True)
+    (root / "scenes" / "train.md").write_text("# Chapter 1\n\nJake cast [[Florum]] to show off.\n", encoding="utf-8")
+    indexer.index(conn, root=root)
+
+    syms = graph.find_symbol(conn, "Florum")
+    assert syms, "Should resolve 'Florum' section as a symbol"
+    florum_sec = syms[0]
+    assert florum_sec["name"] == "Florum" and florum_sec["kind"] == "section"
+
+    refs = graph.references(conn, florum_sec["id"])
+    assert any("train.md" in r["file"] and r["mode"] == "LINKS_TO" for r in refs), refs
+
+
+
 

@@ -8,7 +8,7 @@ NODE_COLS = ("n.id, n.kind, n.name, n.qualified_name, n.signature, n.docstring, 
              "n.line_end, f.rel_path, f.language")
 NODE_FROM = "FROM nodes n JOIN files f ON f.id = n.file_id"
 
-SYMBOL_KINDS = ("function", "method", "class", "variable")
+SYMBOL_KINDS = ("function", "method", "class", "variable", "section", "record", "file")
 
 
 def _brief(row: sqlite3.Row) -> dict:
@@ -39,7 +39,8 @@ def find_symbol(conn: sqlite3.Connection, symbol: str, kinds: tuple[str, ...] | 
     rows = conn.execute(
         f"SELECT {NODE_COLS} {NODE_FROM} WHERE n.kind IN ({ph}) AND "
         "(n.name = ? OR n.qualified_name = ? OR n.qualified_name LIKE ?) "
-        "ORDER BY (n.qualified_name = ?) DESC, (n.name = ?) DESC, n.kind, f.rel_path LIMIT ?",
+        "ORDER BY (n.qualified_name = ?) DESC, (n.name = ?) DESC, "
+        "(n.kind IN ('function', 'method', 'class', 'variable')) DESC, n.kind, f.rel_path LIMIT ?",
         (*kinds, sym, sym, f"%::{sym}", sym, sym, limit)).fetchall()
     return [_brief(r) for r in rows]
 
@@ -65,11 +66,15 @@ def callees(conn, node_id: int) -> list[dict]:
 
 
 def references(conn, node_id: int) -> list[dict]:
-    """Who touches this variable, with read/write mode."""
+    """Who touches this variable, section, or file, with read/write or link mode."""
     out = []
     for r in _edge_rows(conn, node_id, "REFERENCES", "in"):
         d = _brief(r)
         d["mode"] = {"r": "READS", "w": "WRITES"}.get(r["meta"], r["meta"])
+        out.append(d)
+    for r in _edge_rows(conn, node_id, "LINKS_TO", "in"):
+        d = _brief(r)
+        d["mode"] = "LINKS_TO"
         out.append(d)
     return out
 

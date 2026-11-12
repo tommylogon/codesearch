@@ -109,8 +109,8 @@ def cmd_graph(args, conn) -> int:
         _print_nodes("calls", graph.callees(conn, node["id"]))
     else:
         _print_nodes("referenced by", graph.references(conn, node["id"]))
-        if node["kind"] != "variable":
-            print("(note: refs is meant for variables; use callers for functions)")
+        if node["kind"] in ("function", "method"):
+            print("(note: refs is meant for variables and sections; use callers for functions)")
     return 0
 
 

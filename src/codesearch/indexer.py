@@ -299,6 +299,13 @@ def resolve(conn: sqlite3.Connection) -> dict:
             if k:
                 record_by_file[r["file_id"]][k].append(r["id"])
 
+    # Markdown sections can be linked by heading name or anchor
+    section_by_name: dict[str, list[int]] = defaultdict(list)
+    for r in conn.execute("SELECT id, name, qualified_name FROM nodes WHERE kind = 'section'"):
+        k = r["name"].strip().lower()
+        if k and k not in ("(intro)", "(text)"):
+            section_by_name[k].append(r["id"])
+
     out: list[tuple] = []
     counts: dict[str, int] = defaultdict(int)
 
@@ -463,6 +470,14 @@ def resolve(conn: sqlite3.Connection) -> dict:
                     hits = narrowed or hits
                 for h in hits[:config.MAX_AMBIGUOUS_TARGETS]:
                     emit(src, file_node[h], "LINKS_TO")
+
+                # Also link directly to matching markdown section headings
+                target_sec = (r["meta"] or name).strip().lower()
+                sec_hits = section_by_name.get(target_sec, [])
+                if not sec_hits and not hits:
+                    sec_hits = [sid for sname, sids in section_by_name.items() if target_sec in sname for sid in sids]
+                for sid in sec_hits[:config.MAX_AMBIGUOUS_TARGETS]:
+                    emit(src, sid, "LINKS_TO")
             else:
                 t = resolve_path(src_rel, r["target"]) if r["target"].startswith(("/", ".")) else None
                 if t is None:

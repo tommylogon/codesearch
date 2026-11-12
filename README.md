@@ -28,6 +28,25 @@ Most code-search tools for AI coding assistants are either:
 
 ---
 
+## Supported File Formats
+
+`codesearch` indexes source code, tabular datasets, narrative prose, and visual media out of the box:
+
+| Category | Extensions | Indexing & Extraction Depth |
+| :--- | :--- | :--- |
+| **Code** | `.py` | AST hierarchy (classes, methods, functions, calls, imports, docstrings). |
+| | `.ts` | TypeScript AST via Acorn/Node.js bridge. |
+| | `.js`, `.mjs`, `.cjs` | JavaScript AST (ES modules, CommonJS, functions, references). |
+| | `.html` | HTML structure and embedded `<script>` AST extraction. |
+| **Prose & Transcripts** | `.md` | Markdown sections, `# headings`, wikilinks (`[[...]]`), and prose text. |
+| | `.txt` | Plain text documents and segmented notes. |
+| | `.srt`, `.vtt` | Video subtitle and dialogue transcript timelines. |
+| **Data & Tables** | `.json`, `.jsonl` | Nested key paths, schemas, and row-by-row JSONL records. |
+| | `.csv` | Tabular data rows, column headers, and structured cell values. |
+| **Images & Media** | `.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.bmp` | Multimodal dual-indexing: text embeddings for path/filename + visual pixel embeddings via CUDA sidecar. |
+
+---
+
 ## Quickstart
 
 ### 1. Installation

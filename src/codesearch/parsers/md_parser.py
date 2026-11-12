@@ -11,7 +11,7 @@ import re
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
 _FENCE = re.compile(r"^(\s*)(```+|~~~+)\s*([\w+-]*)")
 _LINK = re.compile(r"(?<!\!)\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
-_WIKI = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]")
+_WIKI = re.compile(r"\[\[(?:([^\]|#]+))?(?:#([^\]|]+))?(?:\|[^\]]*)?\]\]")
 
 
 def _frontmatter(lines: list[str]) -> tuple[str, int]:
@@ -90,8 +90,13 @@ def parse(src: str, rel_path: str = "") -> dict:
             refs.append({"source": source, "kind": "LINKS_TO", "target": target.split("#")[0],
                          "qualifier": "path", "meta": ""})
         for m in _WIKI.finditer(text):
-            refs.append({"source": source, "kind": "LINKS_TO", "target": m.group(1).strip(),
-                         "qualifier": "wiki", "meta": ""})
+            page = (m.group(1) or "").strip()
+            anchor = (m.group(2) or "").strip()
+            target = page or anchor
+            meta = anchor if page and anchor else ""
+            if target:
+                refs.append({"source": source, "kind": "LINKS_TO", "target": target,
+                             "qualifier": "wiki", "meta": meta})
 
     def ensure_intro(line_no: int):
         nonlocal cur
