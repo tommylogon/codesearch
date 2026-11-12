@@ -23,6 +23,7 @@ Most code-search tools for AI coding assistants are either:
 - **Multimodal Image Retrieval:** Indexes image files (.png, .jpg, .webp) with dual-space embeddings (filename text + image-server pixel embeddings).
 - **Tabular CSV & JSON Parsing:** Fast extraction of tabular rows, column schemas, and structured documents.
 - **Remote Web API for External Agents:** Expose a read-only, CORS-enabled HTTP interface so remote or web-based agents (e.g. Qwen, GLM, Claude web, or custom frontends) can explore your local codebase safely.
+- **Worldbuilding & Lore Engine:** Treats sprawling fiction repos like stateful codebases. See [CREATIVE_WRITING.md](CREATIVE_WRITING.md) for how it tracks character dossiers, scene continuity, evidence inventories, and epistemic boundaries.
 - **Batteries-Included MCP Server:** Ready to plug into Claude Desktop, Cursor, Cline, Windsurf, and Antigravity.
 
 ---
