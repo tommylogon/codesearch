@@ -231,16 +231,23 @@ The public runner provides a sandboxed, read-only interface:
 ### Running the API Server
 
 ```bash
-python serve_public_viwo.py --root /path/to/target/repo --port 8085 --host 0.0.0.0
+# Run open (no password):
+python serve_public_viwo.py --port 8085 --host 0.0.0.0
+
+# Or protect with a password / key:
+python serve_public_viwo.py --port 8085 --host 0.0.0.0 --key mysecretpassword
 ```
 
-### Endpoints
+### Endpoints & Parameters
 
-- `GET /api/stats`: Node counts, file counts, and language breakdown.
-- `GET /api/search?q=<query>&limit=20`: Hybrid lexical + vector search.
-- `GET /api/code?path=<relative_path>&start=1&end=50`: Sandboxed source line reader.
-- `GET /api/node/<id>`: AST node details and graph relations.
-- `GET /api/graph/<id>?depth=1`: Neighborhood call graph.
+- `GET /api/indexes`: List all available workspace indexes (e.g. `viwo`, `hogwarts`).
+- `GET /api/stats?index=hogwarts`: Node counts, file counts, and language breakdown for a specific workspace.
+- `GET /api/search?q=<query>&index=hogwarts&limit=20`: Hybrid lexical + vector search across the chosen index.
+- `GET /api/code?path=<relative_path>&index=hogwarts&start=1&end=50`: Sandboxed source line reader.
+- `GET /api/node/<id>?index=hogwarts`: AST node details and graph relations.
+- `GET /api/graph/<id>?index=hogwarts&depth=1`: Neighborhood call graph.
+
+When password protection is enabled, pass your secret via query parameter (`?key=mysecretpassword` or `?password=...`) or via standard HTTP header (`Authorization: Bearer mysecretpassword` / `X-API-Key: ...`).
 
 ---
 
