@@ -1,12 +1,16 @@
-"""Hybrid retrieval: FTS5 keyword match fused with four vector indexes by RRF.
+"""Hybrid retrieval: FTS5 keyword match fused with vector lists by RRF.
 
 Lists fused (each ranked, then `weight / (K + rank)` summed per node):
     keyword   every query word must appear (AND), or any (OR with match_all=False)
-    vectors   cosine against filename / function_name / function / comment parts
+    vectors   cosine against filename / function_name / function / comment parts,
+              plus an `image` list from a separate multimodal model for image files
 
 Keyword hits and semantic hits are a UNION: a node that has all the words OR matches the
 meaning of the whole sentence is a result. `strict=True` narrows it to keyword matches and
 lets the vectors only reorder them.
+
+The `image` list is never compared to the text lists as vectors — the two live in different
+spaces with different dimensions. RRF only needs ranks, which is exactly why it is used.
 """
 from __future__ import annotations
 
@@ -16,7 +20,7 @@ from dataclasses import dataclass, field
 
 from . import config, graph
 from .db import split_words
-from .embedder import VectorIndex, embed_query
+from .embedder import VectorIndex, embed_query, image_query
 
 STOPWORDS = {
     "a", "an", "the", "of", "to", "in", "on", "for", "and", "or", "is", "are", "was", "were",
@@ -31,7 +35,7 @@ PART_FTS_COLUMNS = {
     "function": ("signature",),
     "comment": ("docstring",),
 }
-PART_KINDS = {"filename": ("file",)}
+PART_KINDS = {"filename": ("file",), "image": ("file",)}
 
 
 def query_tokens(query: str) -> list[str]:
@@ -66,12 +70,18 @@ class Searcher:
 
     @property
     def vectors(self) -> VectorIndex:
+        # Count rows across every model we know about (text + image) so a vector rebuild is
+        # triggered when either the text or the image index changes underneath us.
         cur = self.conn.execute(
-            "SELECT COUNT(*) FROM vec_cache WHERE model = ?", (config.EMBED_MODEL,)
-        ).fetchone()[0]
-        if self._vectors is None or cur != self._vec_count:
+            "SELECT DISTINCT model FROM vec_cache WHERE part = ? OR part = ?",
+            (config.EMBED_MODEL, config.IMAGE_EMBED_MODEL),
+        ).fetchall()
+        cur = {m[0] for m in cur if m[0]}
+        count = len(cur)
+        key = (count, cur)
+        if self._vectors is None or key != self._vec_count:
             self._vectors = VectorIndex(self.conn)
-            self._vec_count = cur
+            self._vec_count = key
         return self._vectors
 
     def reload_vectors(self) -> None:
@@ -117,17 +127,33 @@ class Searcher:
     # ------------------------------------------------------------ semantic
     def semantic(self, query: str, parts: tuple[str, ...], limit: int) -> dict[str, list[tuple[int, float]]]:
         self.last_vector_error = None
-        vi = self.vectors
+        vi = VectorIndex(self.conn, parts=parts)
         if not vi.available():
             self.last_vector_error = "no vectors built (run: codesearch embed)"
             return {}
+        result: dict[str, list[tuple[int, float]]] = {}
         try:
-            qvec = embed_query(query)
-        except Exception as exc:        # endpoint down: degrade to keyword only, and say so
+            # If the image part is requested, query the multimodal sidecar so vectors live in the
+            # correct (image) space. The floor is stricter because text-vs-image cosines are
+            # narrower (a car query scores ~0.51 against a goblin portrait; 0.45 floor would admit
+            # noise). Images get their own floor of 0.58.
+            if config.IMAGE_PART in parts:
+                qvec = image_query(query)
+                result[config.IMAGE_PART] = [
+                    (i, s) for i, s in vi.top(config.IMAGE_PART, qvec, limit)
+                    if s >= config.IMAGE_MIN_SIMILARITY
+                ]
+            # Text parts stay with the text embedder; if image was handled already, skip it.
+            text_parts = [p for p in parts if p != config.IMAGE_PART]
+            if text_parts:
+                qvec = embed_query(query)
+                for p in text_parts:
+                    result[p] = [(i, s) for i, s in vi.top(p, qvec, limit)
+                                 if s >= config.MIN_SIMILARITY]
+        except Exception as exc:
             self.last_vector_error = f"embedding endpoint unavailable: {exc}"
             return {}
-        return {p: [(i, s) for i, s in vi.top(p, qvec, limit) if s >= config.MIN_SIMILARITY]
-                for p in parts if p in vi.parts}
+        return result
 
     # ------------------------------------------------------------ fusion
     def search(self, query: str, limit: int = 10, kinds=None, languages=None, path_prefix=None,

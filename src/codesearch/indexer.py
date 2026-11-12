@@ -12,14 +12,17 @@ import posixpath
 import sqlite3
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from fnmatch import fnmatch
 from pathlib import Path
 
 from . import config, db, embedder
-from .parsers import html_parser, js_bridge, json_parser, md_parser, py_parser
+from .parsers import csv_parser, html_parser, js_bridge, json_parser, md_parser, py_parser
 
 RESOLVED_KINDS = ("CALLS", "REFERENCES", "IMPORTS", "INHERITS", "LINKS_TO", "CONNECTS_TO")
 JS_BATCH = 150
+# Hashing a photo library is disk-latency bound, not CPU bound. Threads overlap the I/O.
+READ_WORKERS = 8
 BUILTIN_ATTR_CALLS = {
     "get", "set", "has", "add", "delete", "clear", "keys", "values", "entries", "items",
     "push", "pop", "shift", "unshift", "slice", "splice", "map", "filter", "forEach",
@@ -47,7 +50,7 @@ def scan(root: Path) -> tuple[list[dict], dict]:
         dirnames[:] = [d for d in dirnames if d not in config.IGNORE_DIRS]
         for fn in filenames:
             ext = os.path.splitext(fn)[1].lower()
-            lang = config.LANGUAGES.get(ext)
+            lang = config.LANGUAGES.get(ext) or config.IMAGE_LANGUAGES.get(ext)
             if lang is None:
                 continue
             rel = fn if rel_dir == "." else f"{rel_dir}/{fn}"
@@ -65,7 +68,9 @@ def scan(root: Path) -> tuple[list[dict], dict]:
                 st = full.stat()
             except OSError:
                 continue
-            max_bytes = config.MAX_JSON_BYTES if lang == "json" else config.MAX_FILE_BYTES
+            max_bytes = (config.MAX_JSON_BYTES if lang == "json"
+                         else config.IMAGE_MAX_BYTES if lang == "image"
+                         else config.MAX_FILE_BYTES)
             if st.st_size > max_bytes:
                 skipped["too_large"] += 1
                 continue
@@ -89,14 +94,30 @@ def _hash(text: str) -> str:
     return hashlib.blake2b(text.encode("utf-8"), digest_size=16).hexdigest()
 
 
+def _hash_bytes(data: bytes) -> str:
+    return hashlib.blake2b(data, digest_size=16).hexdigest()
+
+
+def _image_dims(path: Path) -> str:
+    """Pixel size, e.g. 1214x1295. It goes in the file node's docstring, which means it is
+    also keyword-searchable and part of the filename embedding."""
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            return f"{im.width}x{im.height}"
+    except Exception:
+        return ""
+
+
 # --------------------------------------------------------------------------- parse
-def _parse_files(changed: list[dict]) -> tuple[dict[str, dict], list[str]]:
+def _parse_files(changed: list[dict], progress=lambda msg: None) -> tuple[dict[str, dict], list[str]]:
     """Return {rel: parsed} and a list of 'rel: reason' parse problems."""
     parsed: dict[str, dict] = {}
     problems: list[str] = []
     js_jobs: list[dict] = []
     html_scripts: dict[str, list[dict]] = {}
-    for f in changed:
+    t0 = time.time()
+    for i, f in enumerate(changed, 1):
         text, lang, rel = f["text"], f["language"], f["rel"]
         if lang == "python":
             parsed[rel] = py_parser.parse(text, rel)
@@ -106,14 +127,21 @@ def _parse_files(changed: list[dict]) -> tuple[dict[str, dict], list[str]]:
             parsed[rel] = md_parser.parse_text(text)
         elif lang == "json":
             parsed[rel] = json_parser.parse(text, rel)
+        elif lang == "csv":
+            parsed[rel] = csv_parser.parse(text, rel)
         elif lang == "html":
             res = html_parser.parse(text, rel)
             parsed[rel] = res
-            for i, s in enumerate(res.get("scripts", [])):
-                js_jobs.append({"id": f"{rel}#{i}", "text": s["text"], "ts": False, "offset": s["offset"]})
+            for i2, s in enumerate(res.get("scripts", [])):
+                js_jobs.append({"id": f"{rel}#{i2}", "text": s["text"], "ts": False, "offset": s["offset"]})
             html_scripts[rel] = res.get("scripts", [])
         elif lang in ("typescript", "javascript"):
             js_jobs.append({"id": rel, "text": text, "ts": lang == "typescript", "offset": 0})
+        elif lang == "image":
+            parsed[rel] = {"file_doc": "", "nodes": [], "refs": []}
+        if i % 500 == 0:
+            rate = i / max(time.time() - t0, 1e-6)
+            progress(f"  parsing: {i}/{len(changed)} files ({rate:.0f}/s)")
     results: dict[str, dict] = {}
     for i in range(0, len(js_jobs), JS_BATCH):
         results.update(js_bridge.parse_batch(js_jobs[i:i + JS_BATCH]))
@@ -165,8 +193,10 @@ def _annotation_target(c: dict, others: list[dict]) -> int | None:
 
 def _insert_file(conn: sqlite3.Connection, f: dict, parsed: dict) -> int:
     rel = f["rel"]
+    is_image = f["language"] == "image"
+    lines = 0 if is_image else f["text"].count("\n") + 1
     cur = conn.execute("INSERT INTO files(rel_path, language, hash, mtime, lines) VALUES (?,?,?,?,?)",
-                       (rel, f["language"], f["hash"], f["mtime"], f["text"].count("\n") + 1))
+                       (rel, f["language"], f["hash"], f["mtime"], lines))
     file_id = cur.lastrowid
 
     def add(kind, name, qname, signature, doc, source, ls, le):
@@ -185,8 +215,9 @@ def _insert_file(conn: sqlite3.Connection, f: dict, parsed: dict) -> int:
 
     fts: list[tuple] = []
     part_rows: list[tuple] = []
-    file_node = add("file", posixpath.basename(rel), "", f["language"], parsed.get("file_doc", ""),
-                    "", 1, f["text"].count("\n") + 1)
+    doc = parsed.get("file_doc", "") or (_image_dims(f["path"]) if is_image else "")
+    file_node = add("file", posixpath.basename(rel), "", f["language"], doc,
+                    "", 1, max(lines, 1))
 
     ids: dict[str, int] = {}
     seen: set[str] = set()
@@ -463,33 +494,67 @@ def index(conn: sqlite3.Connection, root: Path | None = None, force: bool = Fals
 
     changed: list[dict] = []
     unchanged = 0
+
+    # Only files whose mtime moved are re-read. The read is I/O bound (a photo library is
+    # tens of GB), so it runs on a thread pool: disk latency overlaps instead of stacking.
+    todo_read: list[dict] = []
     for f in files:
         prev = existing.get(f["rel"])
         if prev and not force and prev["mtime"] == f["mtime"]:
             unchanged += 1
-            continue
+        else:
+            todo_read.append(f)
+
+    def _read_one(f: dict) -> tuple[dict, str | None]:
+        """Return (file, None) or (file, skip-reason)."""
+        if f["language"] == "image":
+            try:
+                raw = f["path"].read_bytes()
+            except OSError:
+                return f, "unreadable"
+            f["text"] = ""                 # never decoded: images are embedded as pixels
+            f["hash"] = _hash_bytes(raw)
+            return f, None
         text = _read(f["path"])
         if text is None:
-            skipped["binary"] = skipped.get("binary", 0) + 1
-            continue
+            return f, "binary"
         f["text"] = text
         f["hash"] = _hash(text)
-        if prev and not force and prev["hash"] == f["hash"]:
-            conn.execute("UPDATE files SET mtime = ? WHERE id = ?", (f["mtime"], prev["id"]))
-            unchanged += 1
-            continue
-        changed.append(f)
+        return f, None
+
+    t_read = time.time()
+    read = 0
+    if todo_read:
+        with ThreadPoolExecutor(max_workers=READ_WORKERS) as pool:
+            for f, skip in pool.map(_read_one, todo_read):
+                read += 1
+                if skip:
+                    skipped[skip] = skipped.get(skip, 0) + 1
+                    continue
+                prev = existing.get(f["rel"])
+                if prev and not force and prev["hash"] == f["hash"]:
+                    conn.execute("UPDATE files SET mtime = ? WHERE id = ?", (f["mtime"], prev["id"]))
+                    unchanged += 1
+                    continue
+                changed.append(f)
+                if read % 250 == 0:
+                    rate = read / max(time.time() - t_read, 1e-6)
+                    progress(f"  reading: {read}/{len(todo_read)} files hashed ({rate:.0f}/s)")
     progress(f"scan: {len(files)} files, {len(changed)} changed, {unchanged} unchanged, "
              f"{len(removed)} removed, skipped {skipped}")
 
     problems: list[str] = []
     if changed:
-        parsed, problems = _parse_files(changed)
-        for f in changed:
+        t_parse = time.time()
+        parsed, problems = _parse_files(changed, progress)
+        for i, f in enumerate(changed, 1):
             prev = existing.get(f["rel"])
             if prev:
                 db.delete_file(conn, prev["id"])
             _insert_file(conn, f, parsed[f["rel"]])
+            if i % 250 == 0:
+                rate = i / max(time.time() - t_parse, 1e-6)
+                progress(f"  storing: {i}/{len(changed)} files ({rate:.0f}/s)")
         progress(f"parsed and stored {len(changed)} files")
 
     counts = {}

@@ -211,11 +211,17 @@ async function inspect(id) {
   try { code = await api('/api/code?path=' + encodeURIComponent(n.file) + '&start=' + n.line_start + '&end=' + end + '&context=2'); }
   catch (e) { $('code').replaceChildren(el('div', 'loc', 'file not readable: ' + e.message)); return; }
   const box = $('code'); box.replaceChildren();
-  code.lines.forEach((text, i) => {
-    const num = code.start + i; const row = el('div', 'ln' + (num >= code.hit_start && num <= code.hit_end ? ' hit1' : ''));
-    row.append(el('span', 'n', String(num)), el('span', null, text)); box.appendChild(row);
-  });
-  const first = box.querySelector('.hit1'); if (first) box.scrollTop = Math.max(0, first.offsetTop - 40);
+  if (code.image) {
+    const imgWrap = el('div'); imgWrap.style.cssText = 'display:flex; justify-content:center; align-items:center; height:100%; padding:10px; background:#0f1115;';
+    const img = el('img'); img.src = '/api/image?path=' + encodeURIComponent(n.file); img.style.cssText = 'max-width:100%; max-height:100%; object-fit:contain; border-radius:4px;';
+    imgWrap.appendChild(img); box.appendChild(imgWrap);
+  } else {
+    code.lines.forEach((text, i) => {
+      const num = code.start + i; const row = el('div', 'ln' + (num >= code.hit_start && num <= code.hit_end ? ' hit1' : ''));
+      row.append(el('span', 'n', String(num)), el('span', null, text)); box.appendChild(row);
+    });
+    const first = box.querySelector('.hit1'); if (first) box.scrollTop = Math.max(0, first.offsetTop - 40);
+  }
   const abs = code.absolute.replace(/\\/g, '/');
   const a = $('vsl'); a.href = 'vscode://file/' + abs + ':' + n.line_start + ':1'; a.style.display = '';
   const b = $('vsb'); b.style.display = '';

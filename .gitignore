@@ -24,3 +24,9 @@ venv/
 .vscode/
 .idea/
 *.swp
+
+# Logs and transient runs
+*.log
+*.err
+.embed-run.log
+.bet-start.txt

@@ -20,6 +20,9 @@ Most code-search tools for AI coding assistants are either:
 - **True AST Code Graphs:** Resolves definitions, calls, imports, references, and class inheritance trees.
 - **Set-of-Mark Visual Graph (`render_code_graph`):** Renders visual architecture diagrams labeled with numeric badges (`#id`) so multimodal agents (Claude 3.7, GPT-4o, Gemini) can visually inspect call trees and expand subgraphs.
 - **Hybrid Lexical + Vector Retrieval:** Exact identifier matching combined with local embedding models (via LM Studio, Ollama, or any OpenAI-compatible endpoint).
+- **Multimodal Image Retrieval:** Indexes image files (.png, .jpg, .webp) with dual-space embeddings (filename text + image-server pixel embeddings).
+- **Tabular CSV & JSON Parsing:** Fast extraction of tabular rows, column schemas, and structured documents.
+- **Remote Web API for External Agents:** Expose a read-only, CORS-enabled HTTP interface so remote or web-based agents (e.g. Qwen, GLM, Claude web, or custom frontends) can explore your local codebase safely.
 - **Batteries-Included MCP Server:** Ready to plug into Claude Desktop, Cursor, Cline, Windsurf, and Antigravity.
 
 ---
@@ -174,6 +177,50 @@ Add to your `.gemini/antigravity.json` or workspace settings:
   }
 }
 ```
+
+---
+
+## Multimodal Image Embeddings
+
+`codesearch` supports dual-space visual retrieval for UI screenshots, concept art, and diagrams:
+1. File paths and names are embedded into standard text space.
+2. Image pixels are encoded into vision vector space via a lightweight local sidecar.
+
+```bash
+# Start the visual embedding sidecar (default port 1235)
+codesearch image-server --port 1235
+
+# Index a repo including image assets
+codesearch index --images
+
+# Embed image pixels into the visual vector space
+codesearch embed --images
+```
+
+---
+
+## Remote Web API for Web Agents
+
+Allow web-based AI assistants (such as GLM, Qwen, or custom browser agents) to query your local indexes over HTTP without granting shell access or cloud repository uploads.
+
+The public runner provides a sandboxed, read-only interface:
+- **Zero Shell Execution:** Strips execution hooks like `code --goto`.
+- **Path Confinement:** Every query is strictly validated against the target repository root; attempts to navigate outside via `..` return `403 Forbidden`.
+- **CORS Enabled:** Supports cross-origin browser `fetch()` requests and preflights.
+
+### Running the API Server
+
+```bash
+python serve_public_viwo.py --root /path/to/target/repo --port 8085 --host 0.0.0.0
+```
+
+### Endpoints
+
+- `GET /api/stats`: Node counts, file counts, and language breakdown.
+- `GET /api/search?q=<query>&limit=20`: Hybrid lexical + vector search.
+- `GET /api/code?path=<relative_path>&start=1&end=50`: Sandboxed source line reader.
+- `GET /api/node/<id>`: AST node details and graph relations.
+- `GET /api/graph/<id>?depth=1`: Neighborhood call graph.
 
 ---
 

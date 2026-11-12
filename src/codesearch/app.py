@@ -151,11 +151,20 @@ def api_code():
     end = int(request.args.get("end", start))
     ctx = int(request.args.get("context", 3))
     target = _safe_path(path)
+    if target.suffix.lower() in config.IMAGE_LANGUAGES:
+        return jsonify({"path": path, "image": True, "absolute": str(target)})
     lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
     lo, hi = max(1, start - ctx), min(len(lines), end + ctx)
-    return jsonify({"path": path, "start": lo, "end": hi, "hit_start": start, "hit_end": end,
+    return jsonify({"path": path, "image": False, "start": lo, "end": hi, "hit_start": start, "hit_end": end,
                     "total": len(lines), "lines": lines[lo - 1:hi],
                     "absolute": str(target)})
+
+
+@app.get("/api/image")
+def api_image():
+    path = request.args.get("path", "")
+    target = _safe_path(path)
+    return send_file(target)
 
 
 @app.post("/api/open")

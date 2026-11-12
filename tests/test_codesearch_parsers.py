@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
 from codesearch import embedder                                   # noqa: E402
 from codesearch.parsers import html_parser, js_bridge, md_parser, py_parser   # noqa: E402
-from codesearch.parsers import json_parser                       # noqa: E402
+from codesearch.parsers import csv_parser, json_parser                       # noqa: E402
 
 PY = '''"""Module doc."""
 import os
@@ -359,4 +359,49 @@ window.TurnQueue = (() => {
     assert refs(out, source="GraphNetwork::syncGraphData", kind="CALLS",
                 target="_applyNodeLabelDecorations", qualifier="self")
     assert refs(out, source="TurnQueue::initialize", kind="CALLS", target="advance")
+
+
+def test_csv_extraction():
+    csv_data = '''dato,day,general mood,productivity,summary
+2021-12-01,wednsday,6,6,Today marks the first day of my journal! Now I know I should have started this a while ago.
+2021-12-02,thursday,5,4,Short entry today.
+'''
+    res = csv_parser.parse(csv_data, "journal.csv")
+    k = kinds(res)
+    assert any(kind == "record" and "2021-12-01" in qname for kind, qname in k)
+    assert any(kind == "record" and "2021-12-02" in qname for kind, qname in k)
+    
+    # Check that short string column becomes a tag
+    assert any(kind == "tag" and "day" in qname for kind, qname in k)
+    
+    # Check that summary becomes a prose section
+    summary_nodes = [n for n in res["nodes"] if n["kind"] == "section" and n["name"] == "summary"]
+    assert len(summary_nodes) >= 1
+    assert "Today marks the first day" in summary_nodes[0]["docstring"]
+    
+    # Line numbers: header line 1, first row line 2, second row line 3
+    rec1 = next(n for n in res["nodes"] if n["kind"] == "record" and "2021-12-01" in n["qname"])
+    assert rec1["line_start"] == 2
+    assert rec1["line_end"] == 2
+
+
+def test_csv_multiline_cells():
+    csv_data = '''Categories,Protocols,Execution,Rating
+Panic,Snap-Step-Shield,"Step 1: Snap rubber band on wrist.
+Step 2: Step backwards physically.
+Step 3: Ground in the moment.",High
+Dysregulation,Stimulation Menu,"Eat food and rest.",Medium
+'''
+    res = csv_parser.parse(csv_data, "protocols.csv")
+    rec1 = next(n for n in res["nodes"] if n["kind"] == "record" and "Panic" in n["qname"])
+    # Multiline cell spans lines 2 to 4
+    assert rec1["line_start"] == 2
+    assert rec1["line_end"] == 4
+    
+    # Execution section
+    exec_node = next(n for n in res["nodes"] if n["kind"] == "section" and n["name"] == "Execution")
+    assert "Snap rubber band" in exec_node["docstring"]
+    assert exec_node["line_start"] == 2
+    assert exec_node["line_end"] == 4
+
 

@@ -25,7 +25,7 @@ if __package__ in (None, ""):
 from codesearch import config, db, graph, indexer, renderer  # noqa: E402
 from codesearch.search import Searcher                      # noqa: E402
 
-COMMANDS = {"index", "embed", "search", "callers", "callees", "refs", "outline", "render", "stats", "serve", "mcp"}
+COMMANDS = {"index", "embed", "search", "callers", "callees", "refs", "outline", "render", "stats", "serve", "mcp", "image-server"}
 KIND_ALIASES = {"func": "function", "fn": "function", "var": "variable", "doc": "section",
                  "file": "file", "method": "method", "class": "class", "comment": "comment",
                  "section": "section", "block": "block", "function": "function", "variable": "variable",
@@ -60,8 +60,9 @@ def cmd_search(args, conn) -> int:
     searcher = Searcher(conn)
     kinds = [KIND_ALIASES.get(k, k) for k in args.kind] if args.kind else None
     t0 = time.time()
+    part = args.part or (config.IMAGE_PART if args.image else None)
     hits = searcher.search(" ".join(args.query), limit=args.limit, kinds=kinds,
-                           languages=args.lang, path_prefix=args.path, part=args.part,
+                           languages=args.lang, path_prefix=args.path, part=part,
                            match_all=not args.any, strict=args.strict,
                            semantic=not args.no_semantic, keyword=not args.no_keyword)
     if args.json:
@@ -193,9 +194,11 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("search", help="hybrid keyword + semantic search")
     s.add_argument("query", nargs="+")
     s.add_argument("-n", "--limit", type=int, default=10)
-    s.add_argument("--part", choices=config.PARTS, help="search one vector index only")
+    s.add_argument("--part", choices=config.ALL_PARTS, help="search one vector index only")
+    s.add_argument("--image", action="store_true",
+                   help="search the image vector index only (needs the image sidecar running)")
     s.add_argument("--kind", action="append", help="file|class|function|method|variable|comment|section|block|record|tag (repeatable)")
-    s.add_argument("--lang", action="append", help="python|typescript|javascript|markdown|html|text (repeatable)")
+    s.add_argument("--lang", action="append", help="python|typescript|javascript|markdown|html|text|image (repeatable)")
     s.add_argument("--path", help="repo-relative path prefix")
     s.add_argument("--any", action="store_true", help="keyword list matches ANY word instead of all")
     s.add_argument("--strict", action="store_true", help="only keyword matches; vectors just reorder")
@@ -211,9 +214,13 @@ def main(argv: list[str] | None = None) -> int:
                    help="embed new or changed text after indexing (default: on; use --no-embed to skip)")
     i.add_argument("--embed-limit", type=int,
                    help="embed at most N new texts after indexing (default: all)")
-    e = sub.add_parser("embed", help="embed new or changed text into the four vector indexes")
+    i.add_argument("--images", action="store_true",
+                   help="also embed indexed image files into their own vector index (needs image-server)")
+    e = sub.add_parser("embed", help="embed new or changed text into the vector indexes")
     e.add_argument("--limit", type=int, help="embed at most N new texts")
     e.add_argument("--path", help="repo-relative path prefix to embed first")
+    e.add_argument("--images", action="store_true",
+                   help="embed indexed image files into their own vector index (needs image-server)")
     for name in ("callers", "callees", "refs"):
         c = sub.add_parser(name)
         c.add_argument("symbol")
@@ -231,6 +238,8 @@ def main(argv: list[str] | None = None) -> int:
     sv = sub.add_parser("serve", help="web UI")
     sv.add_argument("--port", type=int, default=config.WEB_PORT)
     sub.add_parser("mcp", help="MCP server over stdio")
+    srv_img = sub.add_parser("image-server", help="start the multimodal image embedding sidecar (port 1235)")
+    srv_img.add_argument("--port", type=int, default=1235)
 
     args = p.parse_args(argv)
     if args.root:
@@ -243,26 +252,39 @@ def main(argv: list[str] | None = None) -> int:
         from codesearch import app
         app.run(port=args.port)
         return 0
+    if args.cmd == "image-server":
+        from codesearch.image_server import main as image_server_main
+        image_server_main()
+        return 0
 
     conn = db.connect(args.db)
     try:
         if args.cmd == "index":
-            res = indexer.index(conn, force=args.force, progress=print)
-            print(json.dumps({k: v for k, v in res.items() if k != "problems"}))
+            def progress(msg: str) -> None:
+                print(msg, flush=True)
+            res = indexer.index(conn, force=args.force, progress=progress)
+            print(json.dumps({k: v for k, v in res.items() if k != "problems"}), flush=True)
             for prob in res["problems"]:
                 print("parse problem:", prob)
-            if args.embed:
+            if args.embed or args.images:
                 from codesearch import embedder
-                try:
-                    embedder.preflight()
-                except RuntimeError as exc:
-                    print("embed skipped:", exc, file=sys.stderr)
-                else:
-                    print(json.dumps(embedder.build(conn, limit=args.embed_limit)), flush=True)
+                # Text and image embedding use different models in different spaces. One
+                # being down must not stop the other from building.
+                if args.embed:
+                    try:
+                        embedder.preflight()
+                    except RuntimeError as exc:
+                        print("text embedding skipped:", exc, file=sys.stderr, flush=True)
+                if args.images:
+                    try:
+                        embedder.preflight_images()
+                    except RuntimeError as exc:
+                        print("image embedding skipped:", exc, file=sys.stderr, flush=True)
+                print(json.dumps(embedder.build(conn, limit=args.embed_limit, images=args.images)), flush=True)
             return 0
         if args.cmd == "embed":
             from codesearch import embedder
-            print(json.dumps(embedder.build(conn, limit=args.limit, path_prefix=args.path)), flush=True)
+            print(json.dumps(embedder.build(conn, limit=args.limit, path_prefix=args.path, images=args.images)), flush=True)
             return 0
         if args.cmd == "stats":
             print(json.dumps(db.stats(conn), indent=2))

@@ -418,12 +418,93 @@ def _parse_chat_transcript(data: dict[str, Any], lines: list[str]) -> dict:
             "refs": refs, "problems": []}
 
 
+
+
+def _parse_jsonl(lines: list[str], rel_path: str = "") -> dict:
+    """Extract searchable turns from a JSON Lines (.jsonl) transcript."""
+    nodes: list[dict] = []
+    refs: list[dict] = []
+    problems: list[str] = []
+    turn_idx = 0
+
+    for idx, line in enumerate(lines):
+        line_str = line.strip()
+        if not line_str:
+            continue
+        try:
+            record = json.loads(line_str)
+        except Exception:
+            continue
+        if not isinstance(record, dict):
+            continue
+
+        step_type = record.get("type") or ""
+        content = record.get("content")
+
+        text = ""
+        role = ""
+        if step_type == "USER_INPUT":
+            role = "user"
+            text = str(content or "").strip()
+        elif step_type == "PLANNER_RESPONSE":
+            role = "agent"
+            text = str(content or "").strip()
+        elif step_type in ("SYSTEM_MESSAGE", "GENERIC"):
+            role = "system"
+            text = str(content or "").strip()
+
+        if not text:
+            continue
+
+        turn_idx += 1
+        line_num = idx + 1
+        qname = f"turn_{turn_idx:04d}_{role}"
+
+        nodes.append({
+            "qname": qname,
+            "kind": "section",
+            "name": f"[{role} #{turn_idx}]",
+            "parent": None,
+            "signature": f"{role} step {record.get('step_index', turn_idx)}",
+            "docstring": text,
+            "source": "",
+            "line_start": line_num,
+            "line_end": line_num,
+        })
+
+        for tc in (record.get("tool_calls") or []):
+            if isinstance(tc, dict) and tc.get("name"):
+                tool_name = str(tc["name"])
+                refs.append({
+                    "source": qname,
+                    "target": tool_name,
+                    "kind": "CALLS",
+                    "line": line_num
+                })
+
+    return {
+        "file_doc": f"JSONL transcript ({turn_idx} steps)",
+        "nodes": nodes,
+        "refs": refs,
+        "problems": problems
+    }
+
+
 def parse(src: str, rel_path: str = "") -> dict:
-    """Parse a JSON file into searchable rows, one per key path."""
+    """Parse a JSON or JSONL file into searchable rows."""
     lines = src.splitlines()
+    if rel_path.endswith(".jsonl") or (lines and not src.strip().startswith("{") and not src.strip().startswith("[")):
+        return _parse_jsonl(lines, rel_path)
     try:
         data = json.loads(src)
     except Exception as exc:
+        if len(lines) > 1:
+            try:
+                first = json.loads(lines[0])
+                if isinstance(first, dict):
+                    return _parse_jsonl(lines, rel_path)
+            except Exception:
+                pass
         return {"file_doc": f"invalid json: {exc}", "nodes": [], "refs": [],
                 "problems": [f"invalid json: {exc}"]}
 
