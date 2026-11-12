@@ -30,6 +30,8 @@ Most code-search tools for AI coding assistants are either:
 
 ## Supported File Formats
 
+> For a deep technical breakdown of how each extension is parsed, graphed, and routed across the 4+1 vector spaces, see [INDEXING_PIPELINE.md](INDEXING_PIPELINE.md).
+
 `codesearch` indexes source code, tabular datasets, narrative prose, and visual media out of the box:
 
 | Category | Extensions | Indexing & Extraction Depth |
