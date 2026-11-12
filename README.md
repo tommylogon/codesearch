@@ -134,6 +134,8 @@ The embedder handles exponential backoff, batch splitting, and incremental vecto
 
 ## Connecting to AI Agents (MCP)
 
+> For full JSON request/response schemas, parameter types, and multi-workspace client configurations, see [MCP.md](MCP.md).
+
 `codesearch-mcp` exposes 7 native FastMCP tools:
 - `search_code`: Hybrid lexical BM25 + vector search with snippet previews.
 - `code_neighbors`: Trace AST caller/callee graphs and structural neighbors up to N hops.
