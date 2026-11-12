@@ -251,6 +251,19 @@ python serve_public_viwo.py --port 8085 --host 0.0.0.0 --key mysecretpassword
 
 When password protection is enabled, pass your secret via query parameter (`?key=mysecretpassword` or `?password=...`) or via standard HTTP header (`Authorization: Bearer mysecretpassword` / `X-API-Key: ...`).
 
+### Agent Compatibility & Sandboxing Notes
+
+Not all web-based AI chat interfaces allow arbitrary outbound network access:
+
+| Agent / Platform | Status | Network & Sandbox Behavior |
+| :--- | :--- | :--- |
+| **Qwen** | **Verified Working** | Tool-calling / bash environment can execute `curl` and `requests` against remote IP and port endpoints. |
+| **GLM (chat.z.ai)** | **Verified Working** | Outbound tool execution works cleanly; successfully queries search, code, and graph endpoints over the web. |
+| **ChatGPT (chatgpt.com)** | **Currently Restricted** | Web browsing blocks non-standard ports (such as 8085) and raw IP addresses for SSRF safety. Requires port 443 with a domain (via Cloudflare Tunnel or Tailscale Funnel), or an OpenAPI Action. |
+| **Gemini (gemini.google.com)** | **Currently Restricted** | Cloud Python sandbox is airgapped with no outbound internet access. |
+| **Claude (claude.ai)** | **Currently Restricted** | Standard web chat tools cannot reach external IP/ports unless running via client-side browser artifacts or extensions. |
+| **DeepSeek (chat.deepseek.com)** | **Currently Restricted** | Standard web chat interface does not support arbitrary external network tools. |
+
 ---
 
 ## Architecture
