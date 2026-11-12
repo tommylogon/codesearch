@@ -156,11 +156,12 @@ class Searcher:
         return result
 
     # ------------------------------------------------------------ fusion
-    def search(self, query: str, limit: int = 10, kinds=None, languages=None, path_prefix=None,
+    def search(self, query: str, limit: int = 10, offset: int = 0, kinds=None, languages=None, path_prefix=None,
                part: str | None = None, match_all: bool = True, strict: bool = False,
                semantic: bool = True, keyword: bool = True) -> list[dict]:
         query = query.strip()
         if not query:
+            self.last_total_matched = 0
             return []
         tokens = query_tokens(query)
         hits: dict[int, Hit] = {}
@@ -196,8 +197,10 @@ class Searcher:
                 hits[nid].score += scores[0] + config.MULTI_PART_DECAY * sum(scores[1:])
         if strict and keyword:
             hits = {i: h for i, h in hits.items() if i in kw_ids}
-        ordered = sorted(hits.values(), key=lambda h: -h.score)[:limit]
-        return [self._materialize(h) for h in ordered]
+        ordered = sorted(hits.values(), key=lambda h: -h.score)
+        self.last_total_matched = len(ordered)
+        paged = ordered[offset:offset + limit] if offset else ordered[:limit]
+        return [self._materialize(h) for h in paged]
 
     def _allowed(self, ids: set[int], kinds, languages, path_prefix, part) -> set[int]:
         if not ids:
@@ -221,4 +224,19 @@ class Searcher:
         node["matched"] = sorted(h.lists)
         node["ranks"] = {k: {"rank": r, "raw": round(raw, 4)} for k, (r, raw) in h.lists.items()}
         node["relations"] = graph.summary(self.conn, h.node_id)
+        # Inline head snippet for file-kind hits so callers don't need a separate /api/code hop
+        if node["kind"] == "file" and not node.get("source") and node.get("language") != "image":
+            try:
+                fp = (config.REPO_ROOT / node["file"]).resolve()
+                if fp.is_file():
+                    head_lines = []
+                    with open(fp, "r", encoding="utf-8", errors="replace") as f:
+                        for _ in range(6):
+                            line = f.readline()
+                            if not line:
+                                break
+                            head_lines.append(line.rstrip("\r\n"))
+                    node["source"] = "\n".join(head_lines)
+            except Exception:
+                pass
         return node

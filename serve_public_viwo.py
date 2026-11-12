@@ -215,9 +215,27 @@ def api_search():
             return jsonify({"results": [], "count": 0, "query": "", "index": index_key})
 
         limit = min(int(a.get("limit", 20)), 100)
-        kinds = a.getlist("kind") or None
-        langs = a.getlist("lang") or None
-        prefix = a.get("path") or None
+        offset = max(0, int(a.get("offset", 0)))
+
+        # Forgiving filters: support both singular & plural, comma-separated lists
+        def _get_list(*param_names: str) -> list[str] | None:
+            out = []
+            for name in param_names:
+                for val in a.getlist(name):
+                    for piece in val.split(","):
+                        clean = piece.strip()
+                        if clean:
+                            out.append(clean)
+            return out or None
+
+        kinds = _get_list("kind", "kinds")
+        langs = _get_list("lang", "language", "languages")
+        prefix = a.get("path") or a.get("prefix") or None
+        if prefix:
+            prefix = prefix.replace("**", "").replace("*", "").rstrip("/")
+            if not prefix:
+                prefix = None
+
         part = a.get("part") or None
         match_all = a.get("any") not in ("1", "true")
         strict = a.get("strict") in ("1", "true")
@@ -226,6 +244,7 @@ def api_search():
         hits = s.search(
             query_text,
             limit=limit,
+            offset=offset,
             kinds=kinds,
             languages=langs,
             path_prefix=prefix,
@@ -237,6 +256,9 @@ def api_search():
         return jsonify({
             "results": hits,
             "count": len(hits),
+            "total_matched": getattr(s, "last_total_matched", len(hits)),
+            "offset": offset,
+            "limit": limit,
             "query": query_text,
             "index": index_key,
             "vector_note": s.last_vector_error,
