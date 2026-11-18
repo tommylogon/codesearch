@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "id": "bug-2",
+  "kind": "bug",
+  "number": 2,
+  "title": "Fix 15s-60s FTS5 multi-word OR keyword queries and 35s db.stats() join on large indexes",
+  "status": "done",
+  "priority": "high",
+  "area": "search-engine",
+  "tags": [
+    "sqlite",
+    "fts5",
+    "performance"
+  ],
+  "created": "2026-11-14",
+  "updated": "2026-11-17",
+  "horizon": "now",
+  "effort": "m",
+  "goal": "Eliminate 15s-60s SQLite latency spikes on broad FTS5 keyword queries and index health stats calls",
+  "relations": {
+    "blocks": [],
+    "blocked_by": [],
+    "depends_on": [],
+    "related": [
+      "bug-1",
+      "bug-3"
+    ],
+    "parent": null,
+    "children": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "invalidates": [],
+    "invalidated_by": []
+  },
+  "sections": {
+    "what": "Multi-word keyword searches over viwo (8,418 files / 384,149 nodes) took kw_ms=60,816.5ms (2026-11-14 11:54:18), 27,743.0ms (19:53:40), and 15,909.8ms (19:53:58) in Searcher.keyword (src/codesearch/search.py:147-155), compared to 206.0ms when filtered with path='docs/'. Separately, codesearch_stats(index='viwo') spent 35,242.0ms (mcp.log 19:58:08-19:58:43) triggering three STALL_WATCHDOG warnings inside db.stats() (src/codesearch/db.py:190) on the node_parts x vec_cache GROUP BY join.",
+    "why": "Unfiltered FTS5 joins and db.stats() cross-table scans bottleneck large repositories and inflate end-to-end tool times past 30-60 seconds.",
+    "how": "1. Inspect and optimize Searcher.keyword (src/codesearch/search.py:141-159) for multi-term OR queries over 384k+ FTS rows (e.g., avoid joining files/nodes before pruning top BM25 FTS rowids or use an inner FTS subquery limited before joining metadata tables, and bound per-query candidate expansion).\n2. Replace the full cross-table JOIN in db.stats (src/codesearch/db.py:190-193) with indexed per-model counts or cached counters in meta updated by index/embed rather than joining 337k node_parts x 202k vec_cache rows on every stats call.",
+    "verify": "1. Run search_code(index='viwo', query='knowledge language skill proficiency school hobby math science background', match_all=false) and verify kw_ms in mcp.log drops from 27,743ms to <1s.\n2. Run codesearch_stats(index='viwo') and verify total_ms drops from 35,242ms (3x STALL_WATCHDOG at db.py:190) to <1s.",
+    "acceptance": [
+      {
+        "text": "Multi-word FTS5 OR queries (match_all=false) on viwo complete in <1s instead of 15.9s-60.8s",
+        "done": true
+      },
+      {
+        "text": "codesearch_stats on viwo runs in <1s instead of ~35.2s and no longer triggers 3x STALL_WATCHDOG warnings in db.py:190",
+        "done": true
+      },
+      {
+        "text": "Stats reporting keeps exact node/part/model counts without regressing smaller indexes",
+        "done": true
+      }
+    ],
+    "files": [
+      "src/codesearch/search.py",
+      "src/codesearch/db.py"
+    ],
+    "custom": {}
+  },
+  "links": {
+    "wiki": [],
+    "docs": [],
+    "commits": [],
+    "urls": []
+  },
+  "evidence": [
+    "Optimized Searcher.keyword() in src/codesearch/search.py: zero-join direct FTS5 query when unfiltered, and bounded inner FTS5 subquery with selective-filter fallback when filtered.",
+    "Cached active-model node_parts x vec_cache coverage in meta.stats_vec_coverage keyed by vec_generation in src/codesearch/db.py.",
+    "Verified with `pytest` (58 passed)."
+  ],
+  "invalidation": null,
+  "extra": {}
+}

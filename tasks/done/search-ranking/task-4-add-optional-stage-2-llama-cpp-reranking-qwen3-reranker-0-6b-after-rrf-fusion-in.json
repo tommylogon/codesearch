@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "id": "task-4",
+  "kind": "task",
+  "number": 4,
+  "title": "Add optional stage-2 llama.cpp reranking (Qwen3-Reranker-0.6B) after RRF fusion in codesearch",
+  "status": "done",
+  "priority": "high",
+  "area": "search-ranking",
+  "tags": [
+    "reranker",
+    "qwen3-reranker",
+    "llama-cpp",
+    "search-ranking"
+  ],
+  "created": "2026-11-17",
+  "updated": "2026-11-17",
+  "horizon": "now",
+  "effort": "m",
+  "goal": "",
+  "relations": {
+    "blocks": [],
+    "blocked_by": [],
+    "depends_on": [],
+    "related": [
+      "task-embedder-comparison",
+      "bug-3"
+    ],
+    "parent": null,
+    "children": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "invalidates": [],
+    "invalidated_by": []
+  },
+  "sections": {
+    "what": "Add an optional stage-2 cross-encoder reranker step to codesearch after hybrid BM25+vector RRF fusion, targeting a local llama.cpp server running Qwen3-Reranker-0.6B GGUF from E:.",
+    "why": "Hybrid BM25+vector RRF promotes false positives that merely share keywords (such as unrelated scenes sharing a word like 'scared'). A local Qwen3-Reranker-0.6B cross-encoder scores (instruction + query, chunk) pairs together to promote true causal matches without cloud API costs.",
+    "how": "1. Add rerank configuration in src/codesearch/config.py (RERANK_ENABLED, RERANK_ENDPOINT, RERANK_MODEL, RERANK_TOP_K, RERANK_TIMEOUT, RERANK_INSTRUCTION) and optional llama-server rerank launch support alongside existing embed-server (--rerank / GGUF path on E:).\n2. Add a lightweight rerank_results(query, candidates, ...) client in a new src/codesearch/reranker.py (or in embedder/search) supporting llama.cpp /v1/rerank (and /rerank) with Qwen3-Reranker-0.6B instruction formatting.\n3. Wire stage-2 reranking into Searcher.search() after RRF fusion over the top-N candidates (e.g. top 24-30 -> reranked top `limit`), preserving strict=true and metadata filters.\n4. Fall back cleanly to RRF ordering with diagnostic timing/error reporting when the rerank server is offline or times out, and add unit tests with mocked HTTP responses plus offline fallback.",
+    "verify": "Run pytest in F:\\AI\\codesearch covering mocked /v1/rerank reordering, instruction pass-through, and offline timeout fallback, plus live test against llama-server on E: with Qwen3-Reranker-0.6B GGUF.",
+    "acceptance": [
+      {
+        "text": "Optional stage-2 reranking integrates cleanly after RRF fusion in Searcher.search() and search_code() without blocking when the reranker server is offline.",
+        "done": true
+      },
+      {
+        "text": "Supports llama.cpp / OpenAI-compatible /v1/rerank (or /rerank) with Qwen3-Reranker-0.6B GGUF hosted from E: drive via configurable endpoint, model, top_k, and optional instruction.",
+        "done": true
+      },
+      {
+        "text": "Gracefully falls back to raw RRF order (recording timing/warning diagnostics) on timeout or connection error, with pytest coverage.",
+        "done": true
+      }
+    ],
+    "files": [
+      "src/codesearch/config.py",
+      "src/codesearch/search.py",
+      "src/codesearch/mcp_server.py",
+      "tests/test_codesearch_db.py"
+    ],
+    "custom": {}
+  },
+  "links": {
+    "wiki": [],
+    "docs": [],
+    "commits": [],
+    "urls": []
+  },
+  "evidence": [
+    "Added RERANK_* config options in src/codesearch/config.py and qwen3-reranker-0.6b (--reranking) preset in src/codesearch/embed_server.py.",
+    "Added src/codesearch/reranker.py with Qwen3 instruction formatting, /v1/rerank + /rerank client, and clean offline/timeout fallback.",
+    "Wired stage-2 reranking into Searcher.search() (src/codesearch/search.py) and search_code() (src/codesearch/mcp_server.py).",
+    "Verified with `pytest -k rerank` (1 passed: mocked /v1/rerank reordering, offline fallback, and --reranking command check)."
+  ],
+  "invalidation": null,
+  "extra": {}
+}

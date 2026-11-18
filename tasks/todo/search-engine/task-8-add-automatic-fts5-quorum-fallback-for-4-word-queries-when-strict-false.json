@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "id": "task-8",
+  "kind": "task",
+  "number": 8,
+  "title": "Add automatic FTS5 quorum fallback for 4+ word queries when strict=False",
+  "status": "todo",
+  "priority": "medium",
+  "area": "search-engine",
+  "tags": [
+    "fts5",
+    "search-engine",
+    "quorum"
+  ],
+  "created": "2026-11-17",
+  "updated": "2026-11-17",
+  "horizon": "next",
+  "effort": "",
+  "goal": "",
+  "relations": {
+    "blocks": [],
+    "blocked_by": [],
+    "depends_on": [],
+    "related": [],
+    "parent": null,
+    "children": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "invalidates": [],
+    "invalidated_by": []
+  },
+  "sections": {
+    "what": "In Searcher.keyword(), when match_all=True (and strict=False, no explicit must_terms) with >= 4 tokens returns < limit hits, run a second FTS pass requiring at least ceil(len(tokens) * 0.5) distinct query tokens at 0.75x FTS weight.",
+    "why": "Multi-word natural-language queries hit a 0-result FTS cliff when a single word is missing under AND, while pure OR floods FTS with common words.",
+    "how": "",
+    "verify": "Run pytest tests/test_codesearch_db.py covering multi-word quorum fallback with strict=False vs strict=True.",
+    "acceptance": [
+      {
+        "text": "When match_all=True, strict=False, no must_terms, and len(tokens) >= 4 yields < limit hits, Searcher.keyword runs a quorum pass requiring >= ceil(0.5 * len(tokens)) distinct query tokens at 0.75x FTS weight.",
+        "done": false
+      },
+      {
+        "text": "strict=True never triggers quorum relaxation and preserves exact AND semantics.",
+        "done": false
+      },
+      {
+        "text": "Unit tests cover 5+ word queries hitting quorum fallback when strict=False vs 0 hits when strict=True.",
+        "done": false
+      }
+    ],
+    "files": [
+      "src/codesearch/search.py",
+      "tests/test_codesearch_db.py"
+    ],
+    "custom": {}
+  },
+  "links": {
+    "wiki": [],
+    "docs": [],
+    "commits": [],
+    "urls": []
+  },
+  "evidence": [],
+  "invalidation": null,
+  "extra": {}
+}

@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "id": "task-1",
+  "kind": "task",
+  "number": 1,
+  "title": "Understand taskweave JSON relation edges and downrank terminal tasks",
+  "status": "todo",
+  "priority": "high",
+  "area": "search-engine",
+  "tags": [
+    "taskweave",
+    "json-parser",
+    "search-ranking"
+  ],
+  "created": "2026-11-13",
+  "updated": "2026-11-17",
+  "horizon": "next",
+  "effort": "",
+  "goal": "",
+  "relations": {
+    "blocks": [],
+    "blocked_by": [],
+    "depends_on": [],
+    "related": [
+      "task-json-indexing-test-plan",
+      "task-9"
+    ],
+    "parent": null,
+    "children": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "invalidates": [],
+    "invalidated_by": []
+  },
+  "sections": {
+    "what": "Teach json_parser.py REFERENCE_KEYS to extract taskweave relation edges (blocks, blocked_by, depends_on, supersedes, invalidates, related) across task files and downrank superseded/cancelled/done tasks in search results.",
+    "why": "Once repos store tasks as taskweave JSON files, similarity/keyword search across tasks otherwise treats terminal or invalidated cards equally with active work and misses task graph edges.",
+    "how": "Extend REFERENCE_KEYS / cross-file resolution in src/codesearch/parsers/json_parser.py for taskweave relation fields, and add status-aware score dampening in src/codesearch/search.py when task JSON nodes have superseded/cancelled status unless filtered explicitly.",
+    "verify": "C:\\\\ProgramData\\\\miniconda3\\\\python.exe -m pytest F:\\\\AI\\\\codesearch\\\\tests -v",
+    "acceptance": [
+      {
+        "text": "Extract taskweave relation arrays as cross-task CONNECTS_TO/REF edges in json_parser.py",
+        "done": false
+      },
+      {
+        "text": "Downrank superseded and cancelled task JSON nodes in default search ranking",
+        "done": false
+      },
+      {
+        "text": "Add unit tests covering relation edge extraction and terminal task ranking",
+        "done": false
+      }
+    ],
+    "files": [
+      "src/codesearch/parsers/json_parser.py",
+      "src/codesearch/search.py",
+      "tests/test_codesearch_parsers.py"
+    ],
+    "custom": {}
+  },
+  "links": {
+    "wiki": [],
+    "docs": [],
+    "commits": [],
+    "urls": []
+  },
+  "evidence": [],
+  "invalidation": null,
+  "extra": {}
+}

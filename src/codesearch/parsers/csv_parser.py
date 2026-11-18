@@ -92,14 +92,14 @@ def parse(src: str, rel_path: str = "") -> dict[str, Any]:
     # Line tracking: reader.line_num gives the line where each row ends
     prev_line = reader.line_num
     capped = False
-    max_nodes = getattr(config, "MAX_JSON_NODES", 50000)
+    max_nodes = getattr(config, "MAX_CSV_NODES", None)
 
     for row_idx, row in enumerate(reader, start=1):
         line_start = prev_line + 1
         line_end = reader.line_num
         prev_line = line_end
 
-        if len(nodes) >= max_nodes:
+        if max_nodes is not None and len(nodes) >= max_nodes:
             if not capped:
                 capped = True
                 problems.append(

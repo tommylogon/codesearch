@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "id": "task-5",
+  "kind": "task",
+  "number": 5,
+  "title": "Add explicit AND / OR / NOT boolean payload fields to search_code MCP tool and FTS query builder",
+  "status": "done",
+  "priority": "high",
+  "area": "search",
+  "tags": [
+    "mcp",
+    "fts5",
+    "boolean-search",
+    "search-code"
+  ],
+  "created": "2026-11-17",
+  "updated": "2026-11-17",
+  "horizon": "now",
+  "effort": "s",
+  "goal": "",
+  "relations": {
+    "blocks": [],
+    "blocked_by": [],
+    "depends_on": [],
+    "related": [],
+    "parent": null,
+    "children": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "invalidates": [],
+    "invalidated_by": []
+  },
+  "sections": {
+    "what": "Add explicit structured boolean operator fields (AND, OR, NOT) to the search_code MCP payload and Searcher FTS/hybrid query pipeline so agents can express precise multi-clause keyword constraints without guessing match_all behavior or hitting strict all-token AND failures.",
+    "why": "Currently search_code only exposes a single flat `query: str` and `match_all: bool = True`. Any multi-concept natural-language query fails FTS (`kw_hits=0`) when `match_all=True` because every token is ANDed, while `match_all=False` turns the entire query into an unconstrained OR bag with no way to require core terms or exclude unwanted ones (NOT). Exposing explicit `must_terms` (AND), `should_terms` (OR), and `not_terms` (NOT) fields in the MCP payload makes boolean intent unambiguous for agents and callers.",
+    "how": "1. Extend search_code in src/codesearch/mcp_server.py and Searcher.search / Searcher.keyword in src/codesearch/search.py to accept optional explicit boolean payload parameters:\n   - must_terms: list[str] | None (all required, AND)\n   - should_terms: list[str] | None (at least one, OR)\n   - not_terms: list[str] | None (excluded, NOT)\n2. Update fts_expression(...) (or add build_boolean_fts_expression(...)) in src/codesearch/search.py to safely quote each term/phrase for FTS5 and combine:\n   - positive group: (must_terms joined with AND) combined with (should_terms joined with OR)\n   - exclusion group: NOT (<not_terms joined with OR>)\n   - If only not_terms is given alongside query, combine query's positive expression with NOT (...).\n3. Enforce not_terms filtering on the semantic vector leg / final fused results as well (via FTS/node text check or candidate exclusion) so negated terms cannot sneak back in via vector similarity.\n4. Update AGENT_GUIDE.md and MCP tool docstring to document must_terms / should_terms / not_terms clearly.\n5. Add pytest unit coverage in tests/ for AND, OR, NOT, combined boolean queries, quoting/special-char safety, and backward compatibility with query + match_all.",
+    "verify": "Run pytest on F:\\AI\\codesearch\\tests covering boolean AND/OR/NOT FTS5 expressions, semantic exclusion of not_terms, and MCP search_code payload validation.",
+    "acceptance": [
+      {
+        "text": "search_code MCP tool accepts explicit boolean payload fields: must_terms (AND), should_terms (OR), and not_terms (NOT) alongside existing query and match_all.",
+        "done": true
+      },
+      {
+        "text": "fts_expression / Searcher.keyword compiles must_terms, should_terms, and not_terms cleanly into valid FTS5 MATCH expressions (quoting tokens, joining must_terms with AND, should_terms with OR, and excluding not_terms via NOT).",
+        "done": true
+      },
+      {
+        "text": "not_terms also excludes matching nodes from semantic vector candidates (or filters post-fusion) so strict=false never leaks negated terms.",
+        "done": true
+      },
+      {
+        "text": "Existing callers using only query + match_all remain 100% backward-compatible.",
+        "done": true
+      },
+      {
+        "text": "Unit tests cover AND, OR, NOT, combined AND+OR+NOT, phrase/token quoting, and empty/edge inputs in pytest.",
+        "done": true
+      }
+    ],
+    "files": [
+      "src/codesearch/mcp_server.py",
+      "src/codesearch/search.py",
+      "src/codesearch/AGENT_GUIDE.md",
+      "tests/test_search.py"
+    ],
+    "custom": {}
+  },
+  "links": {
+    "wiki": [],
+    "docs": [],
+    "commits": [],
+    "urls": []
+  },
+  "evidence": [
+    "Added build_boolean_fts_expression and _excluded_by_not_terms in src/codesearch/search.py supporting must_terms (AND), should_terms (OR), and not_terms (NOT) across FTS5 and semantic results.",
+    "Exposed must_terms, should_terms, and not_terms on search_code in src/codesearch/mcp_server.py and updated MCP_INSTRUCTIONS + src/codesearch/AGENT_GUIDE.md.",
+    "Verified with `pytest -k boolean` (1 passed)."
+  ],
+  "invalidation": null,
+  "extra": {}
+}

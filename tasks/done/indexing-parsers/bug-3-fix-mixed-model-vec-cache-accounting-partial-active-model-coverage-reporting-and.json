@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "id": "bug-3",
+  "kind": "bug",
+  "number": 3,
+  "title": "Fix mixed-model vec_cache accounting, partial active-model coverage reporting, and noisy vec-only RRF hits",
+  "status": "done",
+  "priority": "high",
+  "area": "indexing-parsers",
+  "tags": [
+    "embeddings",
+    "search-ranking",
+    "vectors"
+  ],
+  "created": "2026-11-14",
+  "updated": "2026-11-17",
+  "horizon": "now",
+  "effort": "m",
+  "goal": "Keep vector coverage accurate for the active embedding model and prevent unrelated vec-only hits from drowning real results",
+  "relations": {
+    "blocks": [],
+    "blocked_by": [],
+    "depends_on": [],
+    "related": [
+      "bug-2",
+      "task-4"
+    ],
+    "parent": null,
+    "children": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "invalidates": [],
+    "invalidated_by": []
+  },
+  "sections": {
+    "what": "On viwo, codesearch_stats reports embed_model='text-embedding-qwen3-embedding-0.6b' and vec_parts loads 49,083 rows (filename: 1543/9961, function_name: 18127/101864, function: 8163/24968, comment: 21250/100401), meaning ~79% of parts lack active-model vectors while 161,398 legacy text-embedding-embeddinggemma-300m rows remain in vec_cache. However db.stats().vectors_by_part sums across all models without warning, masking the incomplete semantic index. Meanwhile, unfiltered semantic RRF results injected unrelated markdown blocks (e.g. docs/design/event-stream-design-recommendation.md) twice into top-12 results for unrelated queries.",
+    "why": "Agents trust hybrid semantic results assuming full-repo vector coverage, when most of the codebase is unembedded under the active model and weak cosine hits leak noise into RRF results.",
+    "how": "1. In db.stats (src/codesearch/db.py:190-196) and codesearch_stats, compute vectors_by_part for the active embed_model (and optionally active_vectors_coverage_pct per part) instead of summing across orphaned models like embeddinggemma-300m alongside qwen3-embedding-0.6b.\n2. Add a prune-old-models / clean-stale-vectors path when embedding model changes (or emit a clear stale_model warning when active model covers <100% of indexed parts).\n3. Review MIN_SIMILARITY / PART_WEIGHTS / RRF fusion in src/codesearch/search.py so weak semantic matches against un-matched files do not rank identically high alongside direct keyword hits (e.g. score ~0.01587 returning unrelated markdown blocks twice).",
+    "verify": "1. Run codesearch_stats(index='viwo'): verify active embed_model coverage (qwen3: 41,310 rows / 49,083 parts loaded) is clearly distinguished from legacy embeddinggemma-300m rows (161,398) rather than hidden in combined vectors_by_part totals.\n2. Search 'knowledge language skill proficiency school hobby math science background' on viwo and confirm unrelated design docs (event-stream-design-recommendation.md) do not outrank or crowd genuine symbol/doc matches.",
+    "acceptance": [
+      {
+        "text": "codesearch_stats reports vector coverage broken down by the currently configured embed_model vs. total node_parts so partial coverage (~21% in qwen3 vs 161k orphaned embeddinggemma rows) is immediately visible",
+        "done": true
+      },
+      {
+        "text": "CLI/index pipeline offers an option or automatic prompt/warning to prune orphaned vec_cache rows from inactive models or backfill missing active-model vectors",
+        "done": true
+      },
+      {
+        "text": "Unfiltered hybrid searches with keyword hits do not surface low-signal vec:function chunks from unrelated markdown documents above multi-keyword matches without minimum similarity/fusion gating",
+        "done": true
+      }
+    ],
+    "files": [
+      "src/codesearch/db.py",
+      "src/codesearch/embedder.py",
+      "src/codesearch/search.py",
+      "src/codesearch/mcp_server.py"
+    ],
+    "custom": {}
+  },
+  "links": {
+    "wiki": [],
+    "docs": [],
+    "commits": [],
+    "urls": []
+  },
+  "evidence": [
+    "Updated db.stats() in src/codesearch/db.py to report active embed_model vectors_by_part, parts_total_by_part, active_coverage_pct, stale_models, and stale_model_warning.",
+    "Added db.prune_stale_vectors() and `codesearch embed --prune-stale` in src/codesearch/cli.py.",
+    "Added VEC_ONLY_MIN_SIMILARITY (0.55) gating in Searcher.search() when kw_ids is non-empty.",
+    "Verified with `pytest` (58 passed, including test_db_stats_active_model_coverage_prune_and_vec_only_gating)."
+  ],
+  "invalidation": null,
+  "extra": {}
+}

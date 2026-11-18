@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "id": "task-llm-text-interpreter",
+  "kind": "task",
+  "number": null,
+  "title": "Smart LLM File Interpreter (Unstructured `.txt` to Structured JSON)",
+  "status": "todo",
+  "priority": "medium",
+  "area": "indexing-parsers",
+  "tags": [
+    "parsers",
+    "llm-interpreter",
+    "text-indexing"
+  ],
+  "created": "",
+  "updated": "2026-11-13",
+  "horizon": "later",
+  "effort": "",
+  "goal": "",
+  "relations": {
+    "blocks": [],
+    "blocked_by": [],
+    "depends_on": [],
+    "related": [
+      "task-json-indexing-test-plan",
+      "task-2"
+    ],
+    "parent": null,
+    "children": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "invalidates": [],
+    "invalidated_by": []
+  },
+  "sections": {
+    "what": "Add an opt-in offline LLM interpreter (`codesearch interpret` / `index --interpret`) that distills unstructured `.txt` notes into validated JSON sidecars under `.codesearch/interpreted/` while leaving raw `.txt` files untouched and FTS-indexed.",
+    "why": "Mechanical 20-line chunking in `md_parser.parse_text()` yields zero titles, entities, speakers, dates, or graph edges and dilutes embedding vectors across unrelated thoughts in long `.txt` notes.",
+    "how": "Prototype `src/codesearch/interpreter.py` calling an OpenAI-compatible local LLM endpoint (`CODESEARCH_LLM_ENDPOINT`) cached by BLAKE2b hash + prompt/schema version, verify `source_lines` ranges against disk `.txt`, and merge validated sidecar sections inside `indexer.py` pointing back to the raw `.txt` file row.",
+    "verify": "codesearch interpret --path notes/braindump_2026_11.txt writes a schema-valid sidecar under .codesearch/interpreted/ and falls back to md_parser.parse_text() with a problems[] warning if schema validation or line spans fail.",
+    "acceptance": [
+      {
+        "text": "Prototype src/codesearch/interpreter.py with strict JSON schema validation and source_lines bounds checking",
+        "done": false
+      },
+      {
+        "text": "Cache sidecars under .codesearch/interpreted/<rel_path>.json keyed by BLAKE2b hash + model/schema version",
+        "done": false
+      },
+      {
+        "text": "Add codesearch interpret CLI subcommand and wire indexer.py to merge sidecar sections mapped to raw .txt lines while retaining raw FTS5 recall",
+        "done": false
+      },
+      {
+        "text": "Benchmark retrieval accuracy against naive md_parser.parse_text() on unstructured notes",
+        "done": false
+      }
+    ],
+    "files": [
+      "src/codesearch/interpreter.py",
+      "src/codesearch/indexer.py",
+      "src/codesearch/parsers/md_parser.py",
+      "src/codesearch/parsers/json_parser.py",
+      "src/codesearch/cli.py"
+    ],
+    "custom": {
+      "1_current_limitation_in_txt_parsing": "Right now `src/codesearch/indexer.py` routes `.txt`, `.srt`, and `.vtt` files through `md_parser.parse_text()`:\n- Files `<= 80` lines become **one single `(text)` `section` node**.\n- Files `> 80` lines split purely mechanically on blank lines once a buffer reaches `>= 20` lines (`qname = (text)@<line>`).\n- Result: zero titles, zero speaker attribution, zero entity tags, zero date extraction, and zero graph edges (`LINKS_TO` / `CONNECTS_TO`). Long mixed-topic `.txt` notes dilute a single `comment` vector across unrelated thoughts.\n\n---",
+      "2_proposed_architecture": "Introduce an opt-in offline preprocessing pipeline (`codesearch interpret` or `--interpret` during `index`) that uses a fast local LLM (LM Studio / OpenAI-compatible structured outputs) to distill unstructured `.txt` files into structured sidecar JSON documents parsed by `json_parser`.\n\n```\nraw note (.txt)  --[BLAKE2b content hash]--> unchanged? reuse sidecar cache\n                       |\n                 [hash changed / new]\n                       v\n        Local LLM Structured Interpreter\n        (outputs validated JSON schema)\n                       |\n                       v\n    Sidecar Cache: .codesearch/interpreted/<rel_path>.json\n                       |\n                       v\n      Indexed alongside (never replacing!) raw .txt\n```\n\n### Non-Negotiable Safeguards\n\n1. **Never overwrite the source `.txt` file:** User notes stay untouched on disk.\n2. **Exact source line spans are mandatory:** Every extracted JSON section (`topics[]`, `events[]`, `characters[]`, `decisions[]`) must record `source_lines: [start_line, end_line]` matching the original `.txt`, so `get_code` and UI clicks jump directly to the real lines in the `.txt` file.\n3. **Never drop literal keyword recall:** Keep raw `.txt` lines indexed in FTS5 (or keep raw chunks at lower vector weight) so an LLM paraphrase or omission never destroys exact-phrase search (`\"strict=True\"`).\n4. **Content-hash caching & budget controls:** Key sidecars by the source file's BLAKE2b hash + interpreter prompt/schema version (`model + schema_v`), skip already-interpreted files, and support `--limit` / `--path` filters (mirroring `codesearch embed`).\n5. **Strict schema validation:** If the local model returns invalid JSON or hallucinates out-of-range line numbers, fall back cleanly to `md_parser.parse_text()` and record a warning in `problems`.\n\n---",
+      "3_target_intermediate_json_schema": "```json\n{\n  \"source_file\": \"notes/braindump_2026_11.txt\",\n  \"source_hash\": \"blake2b...\",\n  \"doc_type\": \"notes | transcript | story_draft | log\",\n  \"summary\": \"High-level 2-sentence overview of the document.\",\n  \"dates_mentioned\": [\"2026-11-12\"],\n  \"entities\": [\"codesearch\", \"VirtualWorld\", \"Memory Intermediator\"],\n  \"tags\": [\"architecture\", \"tasks-mcp\", \"embeddings\"],\n  \"sections\": [\n    {\n      \"title\": \"Date Filtering Idea\",\n      \"source_lines\": [1, 18],\n      \"kind\": \"topic\",\n      \"tags\": [\"codesearch\", \"date-filter\"],\n      \"content\": \"Structured faithful summary + preserved key quotes/terms.\"\n    }\n  ]\n}\n```\n\nWait note on indexing: because `json_parser.py` routes short values (`tags`, `entities`, `dates_mentioned`) to **keyword-only `tag` nodes** and routes `content` / `summary` to **vector-embedded `section` nodes** (with sentence children above 120 chars), reusing `json_parser` gives rich multi-part search almost for free once line-number mapping points back to the original `.txt`!\n\n---",
+      "4_implementation_steps": "1. Prototype `src/codesearch/interpreter.py` with schema validation and line-span verification against the input `.txt`.\n2. Add CLI subcommand `codesearch interpret [--path ...] [--limit N] [--model ...]` using the OpenAI-compatible endpoint (`CODESEARCH_LLM_ENDPOINT` / LM Studio).\n3. Update `indexer.py` to merge validated sidecar sections for matching hashes during `index()`, remapping `file_id` / `line_start` / `line_end` back to the `.txt` file row so `get_code` opens the raw `.txt`.\n4. Benchmark retrieval accuracy vs. naive `md_parser.parse_text()` on real unstructured notes."
+    }
+  },
+  "links": {
+    "wiki": [],
+    "docs": [],
+    "commits": [],
+    "urls": []
+  },
+  "evidence": [],
+  "invalidation": null,
+  "extra": {
+    "status_note": "Planned (Design Spec)",
+    "area_note": "Indexing & Parsers (`src/codesearch/indexer.py`, `src/codesearch/parsers/`)",
+    "inline_meta": {
+      "target": "Convert flat, unstructured `.txt` files (notes, RP logs, raw transcripts, braindumps) into structured JSON representations so `codesearch` indexes entities, topics, dates, speakers, and relationships instead of blind line chunks."
+    },
+    "migrated_from": "tasks/task-llm-text-interpreter.md"
+  }
+}

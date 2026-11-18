@@ -1,0 +1,75 @@
+version: 1
+preset: core
+project: codesearch
+storage:
+  dir: tasks
+  format: json
+  layout: status_area
+  preview_dir: .previews
+  preview_ttl_minutes: 15
+statuses:
+- todo
+- inprogress
+- review
+- done
+- cancelled
+- superseded
+terminal_statuses:
+- done
+- cancelled
+- superseded
+kinds:
+- task
+- bug
+- epic
+- chore
+priorities:
+- critical
+- high
+- medium
+- low
+areas: []
+tags:
+  normalize: lowercase_kebab
+  allowed: []
+  required_prefixes: []
+  aliases: {}
+fields:
+  required:
+  - id
+  - kind
+  - title
+  - status
+  - priority
+  allowed_extra: true
+  defaults:
+    kind: task
+    status: todo
+    priority: medium
+    horizon: ''
+    effort: ''
+sections:
+  required:
+  - what
+  - acceptance
+  optional:
+  - why
+  - how
+  - verify
+  - files
+  custom: []
+rules:
+  no_stubs: true
+  require_acceptance_for_done: false
+  require_evidence_for_done: false
+  require_wiki: false
+  require_browser_ui: false
+  require_valid_relations: true
+  warn_on_invalidated_refs: true
+codesearch:
+  enabled: true
+  semantic: auto
+  probe_timeout_seconds: 0.6
+  dedupe_threshold: 0.35
+  related_threshold: 0.22
+json_schema: {}

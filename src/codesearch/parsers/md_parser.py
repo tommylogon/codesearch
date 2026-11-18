@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import re
 
+from codesearch.parsers import doc_structure
+
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
 _FENCE = re.compile(r"^(\s*)(```+|~~~+)\s*([\w+-]*)")
 _LINK = re.compile(r"(?<!\!)\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
@@ -23,44 +25,8 @@ def _frontmatter(lines: list[str]) -> tuple[str, int]:
 
 
 def parse_text(src: str) -> dict:
-    """Plain .txt: short files are one section; longer files split into paragraph blocks
-    so a 10,000-line log never acts as one giant bag-of-words document."""
-    lines = src.splitlines()
-    body = src.strip()
-    if not body:
-        return {"file_doc": "", "nodes": [], "refs": []}
-    if len(lines) <= 80:
-        return {"file_doc": "", "nodes": [{
-            "qname": "(text)", "kind": "section", "name": "(text)", "parent": None,
-            "signature": "", "docstring": body, "source": "",
-            "line_start": 1, "line_end": max(1, len(lines)),
-        }], "refs": []}
-    nodes = []
-    buf: list[str] = []
-    start = 1
-    for idx, ln in enumerate(lines, 1):
-        if not ln.strip() and len(buf) >= 20:
-            chunk = "\n".join(buf).strip()
-            if chunk:
-                first = chunk.splitlines()[0][:60]
-                nodes.append({"qname": f"(text)@{start}", "kind": "section", "name": first,
-                              "parent": None, "signature": "", "docstring": chunk, "source": "",
-                              "line_start": start, "line_end": idx - 1})
-            buf = []
-            start = idx + 1
-        else:
-            if not buf and not ln.strip():
-                start = idx + 1
-                continue
-            buf.append(ln)
-    if buf:
-        chunk = "\n".join(buf).strip()
-        if chunk:
-            first = chunk.splitlines()[0][:60]
-            nodes.append({"qname": f"(text)@{start}", "kind": "section", "name": first,
-                          "parent": None, "signature": "", "docstring": chunk, "source": "",
-                          "line_start": start, "line_end": len(lines)})
-    return {"file_doc": "", "nodes": nodes, "refs": []}
+    """Plain .txt: extract hierarchical sections when headings exist, else split cleanly."""
+    return doc_structure.parse_structured_text(src)
 
 
 def parse(src: str, rel_path: str = "") -> dict:
@@ -83,20 +49,7 @@ def parse(src: str, rel_path: str = "") -> dict:
         prose = []
 
     def link_refs(text: str, source: str):
-        for m in _LINK.finditer(text):
-            target = m.group(1)
-            if re.match(r"^[a-z]+://", target) or target.startswith("#") or target.startswith("mailto:"):
-                continue
-            refs.append({"source": source, "kind": "LINKS_TO", "target": target.split("#")[0],
-                         "qualifier": "path", "meta": ""})
-        for m in _WIKI.finditer(text):
-            page = (m.group(1) or "").strip()
-            anchor = (m.group(2) or "").strip()
-            target = page or anchor
-            meta = anchor if page and anchor else ""
-            if target:
-                refs.append({"source": source, "kind": "LINKS_TO", "target": target,
-                             "qualifier": "wiki", "meta": meta})
+        doc_structure.extract_prose_refs(text, source, refs)
 
     def ensure_intro(line_no: int):
         nonlocal cur

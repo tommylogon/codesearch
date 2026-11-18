@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "id": "task-3",
+  "kind": "task",
+  "number": 3,
+  "title": "Log MCP boot exit-1 failures early and add headless codesearch.bat / incremental index tool",
+  "status": "todo",
+  "priority": "medium",
+  "area": "mcp-server",
+  "tags": [
+    "mcp-server",
+    "cli",
+    "diagnostics",
+    "indexing"
+  ],
+  "created": "2026-11-14",
+  "updated": "2026-11-14",
+  "horizon": "next",
+  "effort": "s",
+  "goal": "Make MCP crashes diagnosable and align CLI/MCP indexing entrypoints with headless agent workflows",
+  "relations": {
+    "blocks": [],
+    "blocked_by": [],
+    "depends_on": [],
+    "related": [],
+    "parent": null,
+    "children": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "invalidates": [],
+    "invalidated_by": []
+  },
+  "sections": {
+    "what": "In session transcript (2026-11-14T01:34:25+01:00, L831/L832), parallel codesearch MCP tool calls failed with \"server name codesearch failed to load: exit status 1\" with no crash traceback recorded in C:\\Users\\Tommy\\.codesearch\\mcp.log because file logging is only configured inside _open_index/_trace_tool (mcp_server.py:73-74, 99, 137). In addition, agent instructions reference `codesearch.bat index` or MCP indexing, whereas F:\\AI\\codesearch only ships interactive start_codesearch.bat (which unconditionally boots CUDA sidecar + web UI + pause) and mcp_server.py has no incremental index/refresh tool.",
+    "why": "Uncaught boot exit-1 crashes are invisible to diagnostics, and agents have no headless batch wrapper or MCP mechanism to update stale files in the index after edits.",
+    "how": "1. Initialize diag/file logging at the very top of src/codesearch/mcp_server.py (around FastMCP boot / __main__ entry) with a top-level exception hook writing uncaught startup tracebacks to ~/.codesearch/mcp.log before exiting.\n2. Provide a minimal headless codesearch.bat (forwarding subcommands like `codesearch.bat index` cleanly to `python -u -m codesearch`) distinct from the interactive CUDA+serve start_codesearch.bat, and optionally expose a safe MCP incremental refresh tool (text/AST/keyword index + optional embed) for modified files.",
+    "verify": "1. Force an import/startup exception during mcp_server boot and confirm the traceback is written to C:\\Users\\Tommy\\.codesearch\\mcp.log.\n2. Run headless `codesearch.bat -r F:\\AI\\viwo\\virtual-world index --no-embed` (or similar headless subcommand) without starting CUDA sidecar or pausing on the web UI server.",
+    "acceptance": [
+      {
+        "text": "MCP server startup/import exceptions are written cleanly to ~/.codesearch/mcp.log (or boot error log) instead of vanishing on exit status 1",
+        "done": false
+      },
+      {
+        "text": "A lightweight headless codesearch.bat / CLI entrypoint runs index without forcing CUDA image sidecar startup or web UI serve+pause",
+        "done": false
+      },
+      {
+        "text": "An optional MCP tool (or index freshness flag in search_code/codesearch_stats) lets agents trigger or request incremental indexing on modified files without shelling out to missing batch wrappers",
+        "done": false
+      }
+    ],
+    "files": [
+      "src/codesearch/mcp_server.py",
+      "src/codesearch/__main__.py",
+      "start_codesearch.bat"
+    ],
+    "custom": {}
+  },
+  "links": {
+    "wiki": [],
+    "docs": [],
+    "commits": [],
+    "urls": []
+  },
+  "evidence": [],
+  "invalidation": null,
+  "extra": {}
+}

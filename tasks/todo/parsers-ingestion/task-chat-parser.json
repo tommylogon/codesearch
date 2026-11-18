@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "id": "task-chat-parser",
+  "kind": "task",
+  "number": null,
+  "title": "Smart Chat & Session Parser for codesearch",
+  "status": "todo",
+  "priority": "medium",
+  "area": "parsers-ingestion",
+  "tags": [
+    "parsers",
+    "chat-exports",
+    "sqlite"
+  ],
+  "created": "",
+  "updated": "2026-11-13",
+  "horizon": "later",
+  "effort": "",
+  "goal": "",
+  "relations": {
+    "blocks": [],
+    "blocked_by": [],
+    "depends_on": [],
+    "related": [
+      "task-json-indexing-test-plan"
+    ],
+    "parent": null,
+    "children": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "invalidates": [],
+    "invalidated_by": []
+  },
+  "sections": {
+    "what": "Support indexing conversational AI data (ChatGPT/Claude/DeepSeek/AI Studio JSON exports, transcript JSONLs, and Kilo/OpenCode SQLite session DBs) without polluting default code AST queries.",
+    "why": "Raw agent/chat databases contain noisy bash dumps and traces (over 900k events in kilo.db) that would drown real source code matches if dumped directly into the code graph.",
+    "how": "Add `chat_parser.py` and read-only SQLite `extractors/agent_db.py`, introduce `kind='conversation'` excluded by default in `search_code` unless `kind='conversation'` or `include_chat=True`, extract only high-signal user/assistant text, and add REFERENCES edges to mentioned repo paths.",
+    "verify": "codesearch search \"pc upgrade paths\" --kind conversation returns matching conversation turns in under 3 seconds while default code searches exclude conversation nodes.",
+    "acceptance": [
+      {
+        "text": "Create src/codesearch/parsers/chat_parser.py normalizing ChatGPT, AI Studio, DeepSeek, and generic message exports",
+        "done": false
+      },
+      {
+        "text": "Add read-only SQLite extractor src/codesearch/extractors/agent_db.py for kilo.db and opencode.db",
+        "done": false
+      },
+      {
+        "text": "Add CONVERSATION kind in config.py and exclude conversation nodes from default search_code queries",
+        "done": false
+      },
+      {
+        "text": "Link conversation turns to mentioned repo files via REFERENCES edges",
+        "done": false
+      }
+    ],
+    "files": [
+      "src/codesearch/parsers/chat_parser.py",
+      "src/codesearch/extractors/agent_db.py",
+      "src/codesearch/config.py",
+      "src/codesearch/search.py"
+    ],
+    "custom": {
+      "1_objective": "Support indexing conversational AI data (ChatGPT exports, Claude/DeepSeek JSON exports, Google AI Studio JSON dumps, Kilo/OpenCode session SQLite databases, and transcript JSONLs) so users can semantically search past discussions, architecture decisions, and code prompts with `codesearch` at full vector speed.\n\n---",
+      "2_the_core_problem_the_noise_tsunami": "Raw conversation logs and agent databases contain massive amounts of noisy terminal output, bash traces, npm logs, git diffs, and intermediate tool scratchpads (e.g. `kilo.db` has over 900,000 raw events and 270,000 parts). \n\nDumping raw chat events directly into the code graph would:\n- Drown real code search results in old conversation logs.\n- Cause keywords like function names to match chat transcripts rather than source code definitions.\n\n---",
+      "3_architecture_requirements": "### A. New Node Kind & Language\n- Add `kind = 'conversation'` (or `kind = 'turn'`) to `codesearch`.\n- Add `language = 'chat'` or `language = 'json'` metadata.\n- Exclude `kind = 'conversation'` from default code-only queries unless explicitly requested or when `--kind conversation` is passed (or via separate search mode).\n\n### B. Supported Input Formats\n1. **Generic JSON/JSONL Chat Exports:**\n   - OpenAI / ChatGPT (`conversations.json`)\n   - Claude / Anthropic exports\n   - Google AI Studio prompt/session JSON\n   - DeepSeek JSON exports\n2. **Local Agent Session Databases:**\n   - Kilo (`.local/share/kilo/kilo.db`)\n   - OpenCode (`.local/share/opencode/opencode.db`)\n   - Roo-Cline / Claude-Dev task JSON logs (`ui_messages.json`)\n\n### C. Smart Ingestion & Filtering Rules\n- **Extract only high-signal text:**\n  - `role: user`: The user prompt / problem statement / instructions.\n  - `role: assistant`: The final markdown synthesized response.\n- **Strictly ignore:**\n  - Tool execution dumps (bash command stdout, test traces, file diff chunks).\n  - Base64 images and inline binary assets.\n  - Intermediate thinking/monologue scratchpads unless flagged for inclusion.\n- **Graph Linking:**\n  - Link conversation nodes to any files or repo paths referenced in the chat via `REFERENCES` edges.\n\n---",
+      "4_implementation_steps": "1. Create `src/codesearch/parsers/chat_parser.py`:\n   - Inspect JSON/JSONL structure to detect schema (ChatGPT, AI Studio, DeepSeek, generic messages list).\n   - Normalize into `{ \"session_id\", \"title\", \"turns\": [ {\"role\": \"user\"|\"assistant\", \"text\": \"...\"} ] }`.\n2. Add SQLite extractor helper (`src/codesearch/extractors/agent_db.py`):\n   - Read-only (`?mode=ro`) queries against `kilo.db` / `opencode.db` message tables.\n   - Aggregate user questions and final assistant responses per session.\n3. Update `config.py` and `search.py`:\n   - Add `CONVERSATION` kind.\n   - Default `search_code` to exclude `conversation` nodes unless `kind='conversation'` or `include_chat=True`.\n4. Verification:\n   - Ingest an exported chat JSON.\n   - Run `codesearch search \"pc upgrade paths\" --kind conversation` and verify it returns the exact conversation turn in <3 seconds."
+    }
+  },
+  "links": {
+    "wiki": [],
+    "docs": [],
+    "commits": [],
+    "urls": []
+  },
+  "evidence": [],
+  "invalidation": null,
+  "extra": {
+    "status_note": "Planned / Todo",
+    "area_note": "Parsers & Ingestion",
+    "inline_meta": {
+      "target": "Ingest JSON/JSONL chat exports and SQLite agent session databases into `codesearch` without polluting code AST graphs."
+    },
+    "migrated_from": "tasks/task-chat-parser.md"
+  }
+}

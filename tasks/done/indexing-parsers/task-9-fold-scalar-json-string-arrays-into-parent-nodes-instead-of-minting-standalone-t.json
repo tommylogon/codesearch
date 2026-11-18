@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "id": "task-9",
+  "kind": "task",
+  "number": 9,
+  "title": "Fold scalar JSON string arrays into parent nodes instead of minting standalone tag nodes",
+  "status": "done",
+  "priority": "high",
+  "area": "indexing-parsers",
+  "tags": [
+    "json-parser",
+    "search-ranking",
+    "indexing"
+  ],
+  "created": "2026-11-17",
+  "updated": "2026-11-17",
+  "horizon": "now",
+  "effort": "",
+  "goal": "",
+  "relations": {
+    "blocks": [],
+    "blocked_by": [],
+    "depends_on": [],
+    "related": [
+      "task-1"
+    ],
+    "parent": null,
+    "children": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "invalidates": [],
+    "invalidated_by": []
+  },
+  "sections": {
+    "what": "Stop indexing JSON scalar string arrays (tags, files, links.wiki) as standalone tag nodes; fold them into the parent JSON record or section words and docstring.",
+    "why": "On viwo, 283,900 of 557,944 nodes (51%) are standalone tag nodes from JSON arrays, bloating the index and letting 1-line array items steal top-5 RRF slots.",
+    "how": "",
+    "verify": "Run pytest tests/test_codesearch_parsers.py and verify node counts + search results on sample JSON tasks.",
+    "acceptance": [
+      {
+        "text": "Scalar string arrays in JSON files are folded into parent record/section words and docstring instead of creating standalone tag nodes.",
+        "done": true
+      },
+      {
+        "text": "Existing JSON parser tests updated and passing, confirming tag/array content remains FTS-searchable without top-5 RRF tag-node pollution.",
+        "done": true
+      }
+    ],
+    "files": [
+      "src/codesearch/parsers/json_parser.py",
+      "tests/test_codesearch_parsers.py"
+    ],
+    "custom": {}
+  },
+  "links": {
+    "wiki": [],
+    "docs": [],
+    "commits": [],
+    "urls": []
+  },
+  "evidence": [
+    "Updated _walk_list in src/codesearch/parsers/json_parser.py to fold scalar non-prose JSON arrays into the parent record node instead of minting standalone tag nodes.",
+    "Updated tests/test_codesearch_parsers.py and verified with `pytest tests/test_codesearch_parsers.py` (26 passed)."
+  ],
+  "invalidation": null,
+  "extra": {},
+  "history": [
+    {
+      "from": "todo",
+      "to": "inprogress",
+      "at": "2026-11-17T21:41:29Z"
+    },
+    {
+      "from": "inprogress",
+      "to": "done",
+      "at": "2026-11-17T21:42:15Z"
+    }
+  ]
+}

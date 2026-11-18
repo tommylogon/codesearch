@@ -32,18 +32,25 @@ Add to your tool's MCP configuration file (e.g. `claude_desktop_config.json`, `.
 ```
 
 ### Multi-Workspace Setup
-To connect multiple distinct codebases or world bibles in the same client, register separate server instances pointing to different roots:
+Every index-scoped MCP tool **requires** an explicit `index` parameter (alias or indexed directory path). No default index is silently assumed.
+
+Register workspaces persistently via CLI or pass them in `CODESEARCH_INDEXES` (`name=path;name2=path2` or JSON) or `--index name=path`:
+
+```bash
+python -m codesearch registry scan /path/to/projects
+python -m codesearch registry add /path/to/lore --name lore
+```
 
 ```json
 {
   "mcpServers": {
-    "codesearch-engine": {
+    "codesearch": {
       "command": "python",
-      "args": ["-m", "codesearch", "-r", "F:/AI/viwo/virtual-world", "mcp"]
-    },
-    "codesearch-lore": {
-      "command": "python",
-      "args": ["-m", "codesearch", "-r", "C:/Users/Tommy/Documents/Books/hallowed are the path of chaos", "mcp"]
+      "args": ["-m", "codesearch", "mcp"],
+      "env": {
+        "PYTHONIOENCODING": "utf-8",
+        "CODESEARCH_INDEXES": "engine=/path/to/engine;lore=/path/to/lore"
+      }
     }
   }
 }
@@ -53,24 +60,40 @@ To connect multiple distinct codebases or world bibles in the same client, regis
 
 ## 2. Tool Reference with Request & Response Payloads
 
+### `list_indexes`
+Lists all registered or discovered indexes (`id`, `path`, `ready`, `db_mb`, `vecpacks`) so callers know which `index` value to pass.
+
+**Example Request:**
+```json
+{
+  "name": "list_indexes",
+  "arguments": {}
+}
+```
+
+---
+
 ### `search_code`
 Hybrid BM25 keyword search fused with 4-part semantic vectors via Reciprocal Rank Fusion (RRF).
 
 **Parameters:**
+- `index` *(string, required)*: Registered index alias (from `list_indexes`) or indexed repository directory path.
 - `query` *(string, required)*: Natural language concept or exact identifier.
 - `part` *(string, optional)*: Specific vector part (`"filename"`, `"function_name"`, `"function"`, `"comment"`).
-- `kind` *(string, optional)*: Filter by node kind (`"file"`, `"class"`, `"function"`, `"method"`, `"variable"`, `"comment"`, `"section"`, `"block"`, `"record"`).
-- `language` *(string, optional)*: Filter by language (`"python"`, `"typescript"`, `"javascript"`, `"markdown"`, `"html"`, `"json"`, `"text"`).
+- `kind` *(string, optional)*: Filter by node kind (`"file"`, `"class"`, `"function"`, `"method"`, `"variable"`, `"comment"`, `"section"`, `"block"`, `"record"`, `"tag"`).
+- `language` *(string, optional)*: Filter by language (`"python"`, `"typescript"`, `"javascript"`, `"markdown"`, `"json"`, `"csv"`, `"html"`, `"text"`, `"pdf"`, `"image"`).
 - `path` *(string, optional)*: Repo-relative path prefix.
 - `match_all` *(boolean, optional, default: true)*: `true` for AND keyword logic, `false` for OR.
 - `strict` *(boolean, optional, default: false)*: Only return exact keyword hits; vectors only re-rank.
 - `limit` *(integer, optional, default: 8)*: Max results to return.
+- `after` / `before` *(string, optional)*: File modification time bounds (`YYYY-MM-DD`, ISO datetime, or Unix epoch).
 
 **Example Request:**
 ```json
 {
   "name": "search_code",
   "arguments": {
+    "index": "lore",
     "query": "Florum rainbow rose",
     "kind": "section",
     "limit": 2
@@ -116,9 +139,10 @@ Hybrid BM25 keyword search fused with 4-part semantic vectors via Reciprocal Ran
 ---
 
 ### `find_references`
-Locates everything that references, imports, calls, or links to a symbol across the workspace.
+Locates everything that references, imports, calls, or links to a symbol across the chosen index.
 
 **Parameters:**
+- `index` *(string, required)*: Registered index alias or indexed directory path.
 - `symbol` *(string, required)*: Identifier, class name, method (`Class::method`), or section heading.
 
 **Example Request:**
@@ -126,6 +150,7 @@ Locates everything that references, imports, calls, or links to a symbol across 
 {
   "name": "find_references",
   "arguments": {
+    "index": "lore",
     "symbol": "Florum"
   }
 }
@@ -158,6 +183,7 @@ Locates everything that references, imports, calls, or links to a symbol across 
 Walks callers, callees, and variable references transitively up to N hops.
 
 **Parameters:**
+- `index` *(string, required)*: Registered index alias or indexed directory path.
 - `symbol` *(string, required)*: Function, class, method, or variable name.
 - `direction` *(string, optional, default: "both")*: `"callers"`, `"callees"`, or `"both"`.
 - `depth` *(integer, optional, default: 1)*: Traversal depth (1 to 4).
@@ -167,6 +193,7 @@ Walks callers, callees, and variable references transitively up to N hops.
 {
   "name": "code_neighbors",
   "arguments": {
+    "index": "engine",
     "symbol": "PlayerManager::add_player",
     "direction": "callers",
     "depth": 1
@@ -199,9 +226,10 @@ Walks callers, callees, and variable references transitively up to N hops.
 ---
 
 ### `file_outline`
-Returns the structural skeleton of a file (classes, methods, functions, Markdown sections) with exact line spans before reading code.
+Returns the structural skeleton of a file (classes, methods, functions, Markdown sections, PDF TOC) with exact line/page spans before reading code.
 
 **Parameters:**
+- `index` *(string, required)*: Registered index alias or indexed directory path.
 - `path` *(string, required)*: Repo-relative file path.
 
 **Example Request:**
@@ -209,6 +237,7 @@ Returns the structural skeleton of a file (classes, methods, functions, Markdown
 {
   "name": "file_outline",
   "arguments": {
+    "index": "engine",
     "path": "engine/effect_handlers/memory.py"
   }
 }
@@ -232,18 +261,20 @@ Returns the structural skeleton of a file (classes, methods, functions, Markdown
 ---
 
 ### `get_code`
-Reads exact numbered lines from disk with optional context padding.
+Reads exact numbered lines from disk (or 1-based page slices up to 20 pages per call for `.pdf` files).
 
 **Parameters:**
+- `index` *(string, required)*: Registered index alias or indexed directory path.
 - `path` *(string, required)*: Repo-relative file path.
-- `start` *(integer, required)*: First line number to read (1-based).
-- `end` *(integer, required)*: Last line number to read.
+- `start` *(integer, required)*: First line (or page for PDF) to read (1-based).
+- `end` *(integer, required)*: Last line (or page for PDF) to read.
 
 **Example Request:**
 ```json
 {
   "name": "get_code",
   "arguments": {
+    "index": "engine",
     "path": "engine/effect_handlers/memory.py",
     "start": 22,
     "end": 35
@@ -278,6 +309,7 @@ Reads exact numbered lines from disk with optional context padding.
 Renders an annotated Set-of-Mark (`#id`) dark-theme architecture diagram for multimodal vision models (Claude 3.7, GPT-4o, Gemini).
 
 **Parameters:**
+- `index` *(string, required)*: Registered index alias or indexed directory path.
 - `symbol` *(string, required)*: Symbol name or `#node_id`.
 - `depth` *(integer, optional, default: 1)*: Call graph depth.
 - `expand` *(string, optional)*: Comma-separated list of `#id` values to expand in place on the canvas.
@@ -289,6 +321,7 @@ Renders an annotated Set-of-Mark (`#id`) dark-theme architecture diagram for mul
 {
   "name": "render_code_graph",
   "arguments": {
+    "index": "engine",
     "symbol": "PlayerManager",
     "depth": 1
   }
@@ -298,6 +331,7 @@ Renders an annotated Set-of-Mark (`#id`) dark-theme architecture diagram for mul
 **Example Response:**
 ```json
 {
+  "index": "engine",
   "image_path": "C:/Users/Tommy/.gemini/antigravity/brain/.../graph_PlayerManager.png",
   "node_count": 8,
   "edge_count": 12,
@@ -309,20 +343,26 @@ Renders an annotated Set-of-Mark (`#id`) dark-theme architecture diagram for mul
 ---
 
 ### `codesearch_stats`
-Reports workspace index health, total files, AST nodes, relational edges, and vector dimensions.
+Reports workspace index health, total files, AST nodes, relational edges, vector coverage, and active log path.
+
+**Parameters:**
+- `index` *(string, required)*: Registered index alias or indexed directory path.
 
 **Example Request:**
 ```json
 {
   "name": "codesearch_stats",
-  "arguments": {}
+  "arguments": {
+    "index": "lore"
+  }
 }
 ```
 
 **Example Response:**
 ```json
 {
-  "repository": "hallowed are the path of chaos",
+  "index": "lore",
+  "repo_root": "/path/to/lore",
   "files": 24955,
   "nodes": 202142,
   "edges": 48120,
@@ -331,7 +371,17 @@ Reports workspace index health, total files, AST nodes, relational edges, and ve
     "python": 35,
     "json": 10
   },
-  "vector_dimensions": 1024,
+  "vecpacks": true,
   "status": "ready"
 }
 ```
+
+---
+
+### `codesearch_logs`
+Returns trailing lines from the rotating diagnostic log (stage timings, embedder timeouts/retries, vector pack loads, and stall watchdog stack traces).
+
+**Parameters:**
+- `lines` *(integer, optional, default: 80)*: Number of trailing lines (1 to 500).
+- `index` *(string, optional)*: Target index alias/path when inspecting index-local logs (`cli`, `web`, `public_api`). Omit to read the active MCP server log.
+- `component` *(string, optional, default: `"mcp"`)*: `"mcp"`, `"cli"`, `"web"`, or `"public_api"`.

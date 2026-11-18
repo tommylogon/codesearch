@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "id": "task-2",
+  "kind": "task",
+  "number": 2,
+  "title": "Auto-Report Unsupported Files via Taskweave Tool Call",
+  "status": "todo",
+  "priority": "medium",
+  "area": "indexing-parsers",
+  "tags": [
+    "taskweave",
+    "tool-calling",
+    "indexer",
+    "diagnostics"
+  ],
+  "created": "2026-11-13",
+  "updated": "2026-11-13",
+  "horizon": "later",
+  "effort": "",
+  "goal": "",
+  "relations": {
+    "blocks": [],
+    "blocked_by": [],
+    "depends_on": [],
+    "related": [
+      "task-llm-text-interpreter"
+    ],
+    "parent": null,
+    "children": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "invalidates": [],
+    "invalidated_by": []
+  },
+  "sections": {
+    "what": "Detect skipped/unsupported file extensions (e.g. .docx, .xlsx, .epub) and unparseable/OCR-less scanned files during codesearch indexing, then tool-call or invoke taskweave to create deduplicated parser-support backlog tasks in the codesearch project.",
+    "why": "Currently scan() skips unknown extensions silently and parse failures only appear transiently in problems[]. Having codesearch (and its LLM interpreter) invoke taskweave turns missing format support into tracked backlog items with sample paths and counts.",
+    "how": "1) Aggregate skipped extensions and parse-failure clusters with sample paths and file counts during indexer.scan()/_parse_files(). 2) Add a deduplicating Taskweave reporter helper (check existing tasks via taskweave similar/list before calling taskweave new/set). 3) Expose --report-gaps CLI flag and hook for the LLM file interpreter so unrecognized formats automatically log one canonical task per format/cause.",
+    "verify": "pytest on a fixture repo with multiple .docx files and an empty scanned PDF emits one deduplicated taskweave report per format/cause and does not create duplicates on repeated runs.",
+    "acceptance": [
+      {
+        "text": "Aggregate skipped unsupported extensions and parse-failure clusters in indexer output",
+        "done": false
+      },
+      {
+        "text": "Add idempotent Taskweave duplicate-checking reporter helper for CLI/MCP tool-calling",
+        "done": false
+      },
+      {
+        "text": "Wire interpreter/CLI hook to invoke reporter with sample paths and file counts",
+        "done": false
+      },
+      {
+        "text": "Verify deduplication in pytest without creating duplicate tasks across repeated runs",
+        "done": false
+      }
+    ],
+    "files": [
+      "src/codesearch/indexer.py",
+      "src/codesearch/cli.py"
+    ],
+    "custom": {}
+  },
+  "links": {
+    "wiki": [],
+    "docs": [],
+    "commits": [],
+    "urls": []
+  },
+  "evidence": [],
+  "invalidation": null,
+  "extra": {}
+}

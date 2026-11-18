@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "id": "task-json-indexing-test-plan",
+  "kind": "task",
+  "number": null,
+  "title": "JSON Indexing & Embedding Verification Test Plan",
+  "status": "inprogress",
+  "priority": "medium",
+  "area": "parsers-embedder-routing",
+  "tags": [
+    "parsers",
+    "json",
+    "testing"
+  ],
+  "created": "",
+  "updated": "2026-11-13",
+  "horizon": "next",
+  "effort": "",
+  "goal": "",
+  "relations": {
+    "blocks": [],
+    "blocked_by": [],
+    "depends_on": [],
+    "related": [
+      "task-chat-parser",
+      "task-1"
+    ],
+    "parent": null,
+    "children": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "invalidates": [],
+    "invalidated_by": []
+  },
+  "sections": {
+    "what": "Audit and verify which nodes, FTS rows, graph edges, and vector embeddings are produced across all JSON and JSONL formats (world maps, entities, AI Studio transcripts, Antigravity JSONL, OpenAI ChatML/logs, config manifests, safety caps).",
+    "why": "Without explicit part-routing tests, short keys/tags pollute dense cosine vectors or unknown JSONL schemas silently drop to 0 nodes.",
+    "how": "Maintain matrix tests in `tests/test_codesearch_parsers.py::test_json_format_indexing_and_embedding_matrix`, extend `_parse_jsonl` for ChatML/generic logs, add `MAX_JSON_NODES`/`MAX_JSON_DEPTH` tests, and add `codesearch outline <file> --parts`.",
+    "verify": "C:\\ProgramData\\miniconda3\\python.exe -m pytest F:\\AI\\codesearch\\tests\\test_codesearch_parsers.py -k test_json_format_indexing_and_embedding_matrix -v",
+    "acceptance": [
+      {
+        "text": "Verify initial JSON archetype matrix (scenario maps, entities, AI Studio, Antigravity JSONL, config manifests) in test_json_format_indexing_and_embedding_matrix",
+        "done": true
+      },
+      {
+        "text": "Expand _parse_jsonl to handle OpenAI ChatML (messages[]) and generic structured log JSONL records",
+        "done": false
+      },
+      {
+        "text": "Add MAX_JSON_NODES and MAX_JSON_DEPTH cap boundary unit tests asserting problems[] warnings",
+        "done": false
+      },
+      {
+        "text": "Add codesearch outline <file> --parts CLI inspection flag showing vector-embedded vs keyword-only nodes",
+        "done": false
+      }
+    ],
+    "files": [
+      "src/codesearch/parsers/json_parser.py",
+      "src/codesearch/embedder.py",
+      "src/codesearch/cli.py",
+      "tests/test_codesearch_parsers.py"
+    ],
+    "custom": {
+      "1_how_codesearch_classifies_embeds_json_today": "Unlike naive JSON text splitters, `json_parser.parse()` routes documents through three distinct code paths, and `embedder.part_texts()` applies strict filtering before queueing vectors:\n\n| Node Kind Produced | Trigger Condition in `json_parser.py` | FTS5 Keyword Indexed? | Vector Embedded (`part_texts`)? | Notes / Caveats |\n| :--- | :--- | :--- | :--- | :--- |\n| **`file`** | Every valid/invalid JSON file | Yes (`rel_path` + `file_doc`) | Yes (`filename` part) | `_file_doc` summarizes title/name/lore/collection keys. |\n| **`record`** | Any `dict` or `list` in recursive walker | Yes (shape docstring: child field names & types) | **No** (`part_texts` returns `{}`) | Answers \"which record has field X?\" without polluting cosine vectors with key names. |\n| **`tag`** | Scalars failing `_is_prose()` (`< 40` chars, `< 5` words, no `[.!?]` ending), `null`, or `\"\"` | Yes (`key: value`, split `words`) | **No** (`part_texts` returns `{}`) | Prevents 1-word tags/booleans/numbers from outranking full prose in vector search. |\n| **`section`** | Prose scalars passing `_is_prose()`, plus AI Studio/JSONL turns | Yes | Yes (`function_name` + `comment`) | Values `>= 120` chars also emit sentence child nodes (`::s1`, `::s2`, ...). |\n| **`CONNECTS_TO`** edge | String value under `REFERENCE_KEYS` (`target`, `way_id`, `owner_id`, etc.) | Reflected via `graph.summary` | Indirectly via `section` | Resolves only against records **within the same JSON file**. |\n| **`CALLS`** edge | `tool_calls[].name` in Antigravity `.jsonl` transcripts | Reflected via `graph.summary` | Indirectly via turn `section` | Emitted only by `_parse_jsonl` when `type == \"PLANNER_RESPONSE\"`. |\n\n---",
+      "2_test_matrix_across_json_archetypes": "| # | JSON Archetype | Expected Parser Path | Key Assertions (Nodes & Embeddings) | Verification Status |\n| :--- | :--- | :--- | :--- | :--- |\n| **1** | **Scenario / World Map JSON** (`areas`, `ways`, `exits`, nested dicts) | `_Walker` + `_file_doc` | `CONNECTS_TO` edges resolve `target`/`area_from`; `_file_doc` includes `world_lore` and collection keys; `record` nodes stay keyword-only. | Verified (`test_json_reference_keys_become_connects_to_refs`, `test_json_file_doc_carries_lore_and_scene`) |\n| **2** | **Entity / Item / Character JSON** (`tags`, `traits`, `goals`, `owner_id`, prose bio) | `_Walker` | Short tags -> `tag` (no vector); multi-sentence `personality` -> `section` (`function_name` + `comment` vectors) + `::s1`, `::s2` sentence nodes. | Verified (`test_json_format_indexing_and_embedding_matrix`) |\n| **3** | **AI Studio / Gemini `chunkedPrompt` Export** | `_parse_chat_transcript` | Extracts `systemInstruction` and turns as `section`s; skips `isThought: true`; routes turns to `function_name` + `comment`. | Verified (`test_external_prose_root_and_overview_fallback` + matrix test) |\n| **4** | **Antigravity Transcript `.jsonl`** (`USER_INPUT`, `PLANNER_RESPONSE`) | `_parse_jsonl` | Emits `turn_NNNN_user` / `turn_NNNN_agent` `section` nodes + `CALLS` refs for `tool_calls`. | Verified (`test_json_format_indexing_and_embedding_matrix`) |\n| **5** | **Generic / OpenAI ChatML or Structured Log `.jsonl`** | `_parse_jsonl` (gap!) | **Known Gap Verified:** Currently produces **0 nodes** if records lack Antigravity's `type` enum (`USER_INPUT` / `PLANNER_RESPONSE` / `SYSTEM_MESSAGE` / `GENERIC`). | Documented & asserted in matrix test |\n| **6** | **Config Manifests (`package.json`, `tsconfig.json`, schemas)** | `_Walker` | Produces `record` and `tag` nodes only; **zero** node-level vectors queued (only root `file` node gets `filename` vector). | Verified (`test_json_format_indexing_and_embedding_matrix`) |\n| **7** | **Scale / Safety Boundaries** (`MAX_JSON_NODES`, `MAX_JSON_DEPTH`, malformed files) | `_Walker` / `parse` fallback | Emits explicit warnings in `problems[]` rather than silently truncating or crashing. | Partial (`test_json_invalid_is_reported_not_raised`); add node/depth cap tests next |\n\n---",
+      "3_next_planned_improvements_from_test_findings": "1. **Expand `_parse_jsonl` for OpenAI ChatML & Generic App Logs**:\n   - Support `messages[]` format (fine-tuning / ChatML JSONL), `role` + `content`/`text` pairs, and arbitrary structured log records (fallback to flattened key/prose walk or message extraction) instead of dropping unknown schemas to 0 nodes.\n2. **Add Node-Cap & Depth-Cap Unit Tests**:\n   - Lower `config.MAX_JSON_NODES` / `config.MAX_JSON_DEPTH` via `monkeypatch` in `test_codesearch_parsers.py` to assert clean `problems[]` reporting at bounds.\n3. **Add Vector Inspection CLI Flag (`codesearch outline <file.json> --parts`)**:\n   - Show for any file which extracted nodes receive `filename` / `function_name` / `comment` embeddings vs. keyword-only (`record` / `tag`), making parser tuning transparent without SQLite inspection."
+    }
+  },
+  "links": {
+    "wiki": [],
+    "docs": [],
+    "commits": [],
+    "urls": []
+  },
+  "evidence": [
+    "pytest tests/test_codesearch_parsers.py -k test_json_format_indexing_and_embedding_matrix passed"
+  ],
+  "invalidation": null,
+  "extra": {
+    "status_note": "Initial Matrix Implemented & Verified (`tests/test_codesearch_parsers.py::test_json_format_indexing_and_embedding_matrix`); Extended Corpus Planned",
+    "area_note": "Parsers & Embedder Routing (`src/codesearch/parsers/json_parser.py`, `src/codesearch/embedder.py`)",
+    "inline_meta": {
+      "target": "Audit and verify exactly which nodes, FTS rows, graph edges, and vector embeddings are produced across every JSON and JSONL format encountered in codebases, game data, logs, and AI transcripts."
+    },
+    "migrated_from": "tasks/task-json-indexing-test-plan.md"
+  }
+}

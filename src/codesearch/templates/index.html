@@ -2,260 +2,1813 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>codesearch</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>codesearch | Inspection &amp; Query Workbench</title>
 <style>
-  :root { --bg:#14161a; --panel:#1b1e24; --line:#2c313a; --fg:#d7dae0; --dim:#8b93a1; --acc:#4da3ff; }
+  :root {
+    color-scheme: dark light;
+
+    --bg-canvas: #0f1217;
+    --bg-panel: #161a22;
+    --bg-elevated: #1c222d;
+    --bg-input: #0b0e13;
+    --bg-hover: #212836;
+    --bg-hit: rgba(77, 163, 255, 0.14);
+    --bg-mark: #4c3b09;
+    --fg-mark: #fde68a;
+    --bg-tok: #1e4231;
+    --fg-tok: #a7f3d0;
+
+    --border: #2c3442;
+    --border-strong: #465368;
+    --fg: #e2e6ee;
+    --fg-muted: #98a2b3;
+    --accent: #58a6ff;
+    --accent-fg: #041527;
+    --ok: #3fb950;
+    --warn: #d29922;
+
+    --scroll-track: #13171e;
+    --scroll-thumb: #4a5568;
+
+    @media (prefers-color-scheme: light) {
+      --bg-canvas: #f4f6f9;
+      --bg-panel: #ffffff;
+      --bg-elevated: #edf1f6;
+      --bg-input: #ffffff;
+      --bg-hover: #e5ebf3;
+      --bg-hit: rgba(11, 87, 208, 0.10);
+      --bg-mark: #fef08a;
+      --fg-mark: #422006;
+      --bg-tok: #bbf7d0;
+      --fg-tok: #064e3b;
+
+      --border: #c5cdd9;
+      --border-strong: #748094;
+      --fg: #141923;
+      --fg-muted: #4b5565;
+      --accent: #0b57d0;
+      --accent-fg: #ffffff;
+      --ok: #137333;
+      --warn: #b06000;
+
+      --scroll-track: #e9edf3;
+      --scroll-thumb: #8a94a6;
+    }
+
+    @supports (color: light-dark(white, black)) {
+      --bg-canvas: light-dark(#f4f6f9, #0f1217);
+      --bg-panel: light-dark(#ffffff, #161a22);
+      --bg-elevated: light-dark(#edf1f6, #1c222d);
+      --bg-input: light-dark(#ffffff, #0b0e13);
+      --bg-hover: light-dark(#e5ebf3, #212836);
+      --bg-hit: light-dark(rgba(11, 87, 208, 0.10), rgba(77, 163, 255, 0.14));
+      --bg-mark: light-dark(#fef08a, #4c3b09);
+      --fg-mark: light-dark(#422006, #fde68a);
+      --bg-tok: light-dark(#bbf7d0, #1e4231);
+      --fg-tok: light-dark(#064e3b, #a7f3d0);
+      --border: light-dark(#c5cdd9, #2c3442);
+      --border-strong: light-dark(#748094, #465368);
+      --fg: light-dark(#141923, #e2e6ee);
+      --fg-muted: light-dark(#4b5565, #98a2b3);
+      --accent: light-dark(#0b57d0, #58a6ff);
+      --accent-fg: light-dark(#ffffff, #041527);
+      --ok: light-dark(#137333, #3fb950);
+      --warn: light-dark(#b06000, #d29922);
+      --scroll-track: light-dark(#e9edf3, #13171e);
+      --scroll-thumb: light-dark(#8a94a6, #4a5568);
+    }
+
+    accent-color: var(--accent);
+    scrollbar-color: var(--scroll-thumb) var(--scroll-track);
+  }
+
   * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg); font:13px/1.45 system-ui,Segoe UI,sans-serif;
-         height:100vh; display:grid; grid-template-columns: 420px 1fr; grid-template-rows: 1fr 300px; }
-  #left { grid-row: 1 / 3; border-right:1px solid var(--line); display:flex; flex-direction:column; min-height:0; }
-  #searchbar { padding:10px; border-bottom:1px solid var(--line); background:var(--panel); }
-  #q { width:100%; padding:8px 10px; background:#0f1115; color:var(--fg); border:1px solid var(--line); border-radius:4px; font-size:14px; }
-  .chips { margin-top:6px; display:flex; flex-wrap:wrap; gap:4px; align-items:center; }
-  .chip { padding:2px 8px; border:1px solid var(--line); border-radius:10px; cursor:pointer; color:var(--dim); user-select:none; }
-  .chip.on { background:var(--acc); color:#001; border-color:var(--acc); }
-  .lbl { color:var(--dim); font-size:11px; margin-right:2px; }
-  #status { padding:4px 10px; color:var(--dim); font-size:12px; border-bottom:1px solid var(--line); }
-  #results { overflow:auto; flex:1; }
-  .hit { padding:8px 10px; border-bottom:1px solid var(--line); cursor:pointer; }
-  .hit:hover, .hit.sel { background:#222731; }
-  .hit .t { display:flex; gap:6px; align-items:baseline; }
-  .kind { font-size:10px; padding:0 5px; border-radius:3px; color:#000; font-weight:600; }
-  .name { font-weight:600; word-break:break-all; }
-  .loc { color:var(--dim); font-size:11px; }
-  .doc { color:#aab1bd; font-size:12px; margin-top:3px; max-height:5.5em; overflow:auto; white-space:pre-wrap; }
-  .rel { color:var(--dim); font-size:11px; margin-top:2px; }
-  .matched { color:#6fcf97; font-size:10px; }
-  #graphwrap { position:relative; min-height:0; }
-  #graph { position:absolute; inset:0; }
-  #graphbar { position:absolute; top:6px; left:8px; right:8px; z-index:2; display:flex; gap:6px; flex-wrap:wrap; align-items:center;
-              background:rgba(27,30,36,.85); padding:4px 8px; border-radius:4px; }
-  #hint { position:absolute; bottom:6px; left:8px; z-index:2; color:var(--dim); font-size:11px; background:rgba(20,22,26,.8); padding:2px 6px; border-radius:3px; }
-  #inspector { border-top:1px solid var(--line); background:var(--panel); display:flex; flex-direction:column; min-height:0; }
-  #ihead { padding:6px 10px; border-bottom:1px solid var(--line); display:flex; gap:10px; align-items:center; }
-  #ihead .path { font-weight:600; flex:1; word-break:break-all; }
-  button, a.btn { background:#2a3140; color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:3px 9px; cursor:pointer; text-decoration:none; font-size:12px; }
-  button:hover, a.btn:hover { border-color:var(--acc); }
-  #code { position:relative; overflow:auto; flex:1; font:12px/1.5 Consolas,Menlo,monospace; padding:4px 0; }
-  .ln { display:flex; white-space:pre; }
-  .ln .n { width:52px; text-align:right; padding-right:10px; color:var(--dim); user-select:none; flex-shrink:0; }
-  .ln.hit1 { background:#25324a; }
-  .legend span { margin-right:8px; font-size:11px; color:var(--dim); }
-  .legend i { display:inline-block; width:14px; height:3px; vertical-align:middle; margin-right:3px; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    block-size: 100%;
+    background: var(--bg-canvas);
+    color: var(--fg);
+    font: 0.875rem/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  /* Two-column flex shell: left column has 2 stacked rows (search + graph), right column is 1 row (data). */
+  .workbench {
+    display: flex;
+    flex-direction: row;
+    block-size: 100dvb;
+    inline-size: 100%;
+    overflow: hidden;
+  }
+
+  .col-left {
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 clamp(410px, 44vw, 660px);
+    min-inline-size: 0;
+    min-block-size: 0;
+    border-inline-end: 1px solid var(--border);
+  }
+
+  .col-right {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    min-block-size: 0;
+    background: var(--bg-panel);
+  }
+
+  @media (max-width: 960px) {
+    .workbench {
+      flex-direction: column;
+      block-size: auto;
+      min-block-size: 100dvb;
+      overflow: auto;
+    }
+    .col-left {
+      flex: none;
+      inline-size: 100%;
+      border-inline-end: 0;
+      border-block-end: 1px solid var(--border);
+    }
+    .pane-search { max-block-size: 62dvb; }
+    .pane-graph { min-block-size: 360px; }
+    .col-right { min-block-size: 65dvb; }
+  }
+
+  /* Row 1 of left column: Search + Filters + Ranked Hits */
+  .pane-search {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 56%;
+    min-block-size: 0;
+    min-inline-size: 0;
+    background: var(--bg-panel);
+    border-block-end: 1px solid var(--border);
+  }
+
+  /* Row 2 of left column: Graph Canvas */
+  .pane-graph {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 44%;
+    min-block-size: 220px;
+    min-inline-size: 0;
+    position: relative;
+    background: var(--bg-canvas);
+  }
+
+  .topbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+    padding: 0.55rem 0.75rem;
+    background: var(--bg-elevated);
+    border-block-end: 1px solid var(--border);
+  }
+
+  .brand {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .stats-pill {
+    margin-inline-start: auto;
+    font-size: 0.75rem;
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .control-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 0.6rem 0.75rem;
+    border-block-end: 1px solid var(--border);
+    background: var(--bg-panel);
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    flex: 1 1 165px;
+    min-inline-size: 0;
+  }
+
+  .field.wide {
+    flex: 1 1 100%;
+  }
+
+  label.flbl, legend {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--fg-muted);
+    padding: 0;
+  }
+
+  select, input[type="search"], input[type="text"], button, a.btn {
+    font: inherit;
+    color: var(--fg);
+    background: var(--bg-input);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    min-block-size: 32px;
+  }
+
+  select, input[type="search"], input[type="text"] {
+    padding: 0.3rem 0.55rem;
+    inline-size: 100%;
+    min-inline-size: 0;
+  }
+
+  button, a.btn {
+    padding: 0.25rem 0.65rem;
+    cursor: pointer;
+    text-decoration: none;
+    background: var(--bg-elevated);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3rem;
+    user-select: none;
+    white-space: nowrap;
+  }
+
+  button.primary {
+    background: var(--accent);
+    color: var(--accent-fg);
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+
+  button:hover, a.btn:hover { border-color: var(--accent); }
+  button[aria-pressed="true"], button[aria-selected="true"] {
+    background: var(--accent);
+    color: var(--accent-fg);
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+
+  :where(button, a, input, select):focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .query-row {
+    display: flex;
+    gap: 0.4rem;
+    align-items: stretch;
+  }
+
+  .query-row input[type="search"] {
+    flex: 1 1 auto;
+    font-size: 0.92rem;
+  }
+
+  fieldset.filters {
+    border: 0;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 0.5rem;
+    align-items: center;
+    inline-size: 100%;
+  }
+
+  .chip-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.28rem;
+    align-items: center;
+  }
+
+  label.toggle-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.15rem 0.5rem;
+    min-block-size: 26px;
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    font-size: 0.74rem;
+    color: var(--fg-muted);
+    cursor: pointer;
+    background: var(--bg-input);
+    user-select: none;
+  }
+
+  label.toggle-pill input {
+    margin: 0;
+    inline-size: 13px;
+    block-size: 13px;
+  }
+
+  label.toggle-pill:has(:checked) {
+    background: var(--accent);
+    color: var(--accent-fg);
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+
+  .telemetry {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem 0.6rem;
+    padding: 0.35rem 0.75rem;
+    border-block-end: 1px solid var(--border);
+    background: var(--bg-elevated);
+    font-size: 0.75rem;
+    color: var(--fg-muted);
+  }
+
+  .tok-pill {
+    padding: 0.05rem 0.38rem;
+    border-radius: 4px;
+    background: var(--bg-tok);
+    color: var(--fg-tok);
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 0.72rem;
+  }
+
+  /* Scrollable panes with containment */
+  .scroll-pane {
+    overflow: auto;
+    scrollbar-gutter: stable;
+    overscroll-behavior: contain;
+    min-block-size: 0;
+    min-inline-size: 0;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 360px auto 480px;
+  }
+
+  @supports not (content-visibility: auto) {
+    .scroll-pane { contain: layout style paint; }
+  }
+
+  @supports not (scrollbar-color: auto) {
+    .scroll-pane::-webkit-scrollbar { width: 12px; height: 12px; }
+    .scroll-pane::-webkit-scrollbar-thumb { background: var(--scroll-thumb); }
+    .scroll-pane::-webkit-scrollbar-track { background: var(--scroll-track); }
+  }
+
+  #results {
+    flex: 1 1 auto;
+  }
+
+  .hit {
+    padding: 0.55rem 0.75rem;
+    border-block-end: 1px solid var(--border);
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 0.22rem;
+  }
+
+  .hit:hover { background: var(--bg-hover); }
+  .hit.sel {
+    background: var(--bg-hit);
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+
+  .hit-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.35rem;
+  }
+
+  .rank-num {
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 0.72rem;
+    color: var(--fg-muted);
+    font-weight: 700;
+  }
+
+  .kind-badge {
+    font-size: 0.68rem;
+    padding: 0.05rem 0.35rem;
+    border-radius: 4px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #0b0e13;
+    border: 1px solid rgba(0, 0, 0, 0.25);
+  }
+
+  .hit-name {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+    color: var(--fg);
+  }
+
+  .hit-loc {
+    margin-inline-start: auto;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 0.72rem;
+    color: var(--fg-muted);
+  }
+
+  .hit-doc {
+    font-size: 0.78rem;
+    color: var(--fg);
+    opacity: 0.9;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    line-clamp: 3;
+    overflow: clip;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .hit-why {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.45rem;
+    align-items: center;
+    font-size: 0.72rem;
+  }
+
+  .match-pill {
+    padding: 0.05rem 0.35rem;
+    border-radius: 4px;
+    font-family: ui-monospace, Consolas, monospace;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    color: var(--ok);
+  }
+
+  .rel-summary {
+    color: var(--fg-muted);
+    font-size: 0.72rem;
+  }
+
+  /* Graph panel */
+  .graph-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.4rem 0.6rem;
+    background: var(--bg-elevated);
+    border-block-end: 1px solid var(--border);
+    z-index: 2;
+  }
+
+  .graph-bar button { min-block-size: 26px; font-size: 0.75rem; padding: 0.15rem 0.5rem; }
+
+  #graph {
+    flex: 1 1 auto;
+    min-block-size: 0;
+    inline-size: 100%;
+  }
+
+  .graph-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.35rem;
+    padding: 0.25rem 0.6rem;
+    background: var(--bg-panel);
+    border-block-start: 1px solid var(--border);
+    font-size: 0.72rem;
+    color: var(--fg-muted);
+  }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+  }
+
+  .legend span { display: inline-flex; align-items: center; gap: 0.22rem; }
+  .legend i { display: inline-block; inline-size: 11px; block-size: 3px; border-radius: 2px; }
+
+  /* Right Column: Regex-Tester Style Data + Breakdown Inspector */
+  .data-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.45rem 0.7rem;
+    padding: 0.55rem 0.85rem;
+    background: var(--bg-elevated);
+    border-block-end: 1px solid var(--border);
+  }
+
+  .data-title {
+    font-weight: 700;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 0.85rem;
+    overflow-wrap: anywhere;
+  }
+
+  .data-meta {
+    font-size: 0.76rem;
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .data-actions {
+    margin-inline-start: auto;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    align-items: center;
+  }
+
+  .tablist {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    padding: 0.4rem 0.85rem;
+    background: var(--bg-panel);
+    border-block-end: 1px solid var(--border);
+    align-items: center;
+  }
+
+  .tab-panel {
+    flex: 1 1 auto;
+    min-block-size: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .tab-panel[hidden] { display: none; }
+
+  /* Source / regex match viewer */
+  .banner-selected {
+    padding: 0.5rem 0.85rem;
+    background: var(--bg-hit);
+    border-block-end: 1px solid var(--border);
+    font-size: 0.78rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .banner-selected[hidden] { display: none; }
+
+  .source-view {
+    flex: 1 1 auto;
+    padding: 0.45rem 0;
+    font-family: ui-monospace, Consolas, Menlo, monospace;
+    font-size: 0.78rem;
+    line-height: 1.55;
+  }
+
+  .src-line {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    padding: 0.1rem 0.85rem 0.1rem 0.35rem;
+    border-inline-start: 3px solid transparent;
+  }
+
+  .src-line.line-hit {
+    background: var(--bg-hit);
+    border-inline-start-color: var(--warn);
+  }
+
+  .src-line.line-focus {
+    background: var(--bg-hit);
+    border-inline-start-color: var(--accent);
+    box-shadow: inset 0 1px 0 var(--border), inset 0 -1px 0 var(--border);
+  }
+
+  .ln-num {
+    flex: 0 0 42px;
+    text-align: end;
+    color: var(--fg-muted);
+    user-select: none;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ln-code {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .src-view.nowrap .ln-code {
+    white-space: pre;
+    overflow-wrap: normal;
+  }
+
+  .ln-tags {
+    flex: 0 1 250px;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.2rem;
+  }
+
+  .mini-node-btn {
+    min-block-size: 20px;
+    padding: 0.04rem 0.35rem;
+    font-size: 0.68rem;
+    font-family: ui-monospace, Consolas, monospace;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+
+  mark.hit-mark {
+    background: var(--bg-mark);
+    color: var(--fg-mark);
+    border-radius: 2px;
+    padding-inline: 1px;
+  }
+
+  mark.tok-mark {
+    background: var(--bg-tok);
+    color: var(--fg-tok);
+    border-radius: 2px;
+    padding-inline: 1px;
+    text-decoration: underline;
+  }
+
+  /* Anatomy cards */
+  .anatomy-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: center;
+    padding: 0.45rem 0.85rem;
+    border-block-end: 1px solid var(--border);
+    background: var(--bg-elevated);
+  }
+
+  .anatomy-toolbar input[type="search"] {
+    max-inline-size: 240px;
+  }
+
+  .anatomy-list {
+    flex: 1 1 auto;
+    padding: 0.65rem 0.85rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+
+  .node-card {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-canvas);
+    padding: 0.55rem 0.7rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .node-card.card-focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+
+  .node-card.card-matched {
+    border-inline-start: 4px solid var(--ok);
+  }
+
+  .nc-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+  }
+
+  .nc-id {
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 0.74rem;
+    color: var(--fg-muted);
+  }
+
+  .nc-qname {
+    font-family: ui-monospace, Consolas, monospace;
+    font-weight: 600;
+    font-size: 0.8rem;
+    overflow-wrap: anywhere;
+  }
+
+  .kv-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-size: 0.76rem;
+  }
+
+  .kv-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: baseline;
+  }
+
+  .kv-k {
+    flex: 0 0 98px;
+    color: var(--fg-muted);
+    font-weight: 600;
+    font-size: 0.72rem;
+  }
+
+  .kv-v {
+    flex: 1 1 200px;
+    min-inline-size: 0;
+    font-family: ui-monospace, Consolas, monospace;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    background: var(--bg-panel);
+    padding: 0.2rem 0.4rem;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+
+  .part-box {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.35rem 0.5rem;
+    background: var(--bg-panel);
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
+  .part-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: center;
+    font-size: 0.73rem;
+  }
+
+  .part-badge {
+    font-family: ui-monospace, Consolas, monospace;
+    font-weight: 700;
+    color: var(--accent);
+  }
+
+  .vec-ok { color: var(--ok); font-weight: 600; }
+  .vec-none { color: var(--fg-muted); }
+
+  table.rel-table {
+    inline-size: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+  }
+
+  table.rel-table caption {
+    text-align: start;
+    padding: 0.5rem 0.85rem;
+    font-weight: 600;
+    color: var(--fg-muted);
+  }
+
+  table.rel-table th, table.rel-table td {
+    padding: 0.4rem 0.65rem;
+    border-block-end: 1px solid var(--border);
+    text-align: start;
+    vertical-align: top;
+    overflow-wrap: anywhere;
+  }
+
+  table.rel-table th {
+    background: var(--bg-elevated);
+    position: sticky;
+    top: 0;
+  }
+
+  .empty-state {
+    padding: 1.5rem 1rem;
+    color: var(--fg-muted);
+    text-align: center;
+    font-size: 0.85rem;
+  }
+
+  @media (forced-colors: active) {
+    .node-card, .hit, .kind-badge, button, input, select {
+      border: 1px solid CanvasText;
+    }
+    .hit.sel, .node-card.card-focus {
+      outline: 2px solid Highlight;
+    }
+  }
 </style>
 </head>
 <body>
-<div id="left">
-  <div id="searchbar">
-    <input id="q" placeholder="search code, comments, docs... (Enter)" autofocus>
-    <div class="chips" id="kinds"><span class="lbl">kind</span></div>
-    <div class="chips" id="langs"><span class="lbl">lang</span></div>
-    <div class="chips" id="parts"><span class="lbl">index</span></div>
-    <div class="chips" id="modes"><span class="lbl">mode</span></div>
+<main class="workbench">
+  <!-- LEFT COLUMN: 2 stacked rows (Row 1 = Search + Filters + Results, Row 2 = Graph) -->
+  <div class="col-left">
+    <section class="pane-search" aria-labelledby="app-heading">
+      <div class="topbar">
+        <h1 class="brand" id="app-heading">codesearch workbench</h1>
+        <span class="stats-pill" id="stats-pill">loading indexes...</span>
+      </div>
+
+      <search>
+        <form id="search-form" class="control-grid">
+          <div class="field">
+            <label class="flbl" for="index-select">Index</label>
+            <select id="index-select" name="index"></select>
+          </div>
+          <div class="field">
+            <label class="flbl" for="file-select">Inspected File</label>
+            <select id="file-select" name="file"></select>
+          </div>
+
+          <div class="field wide">
+            <label class="flbl" for="q">Query (keywords or full natural-language sentences)</label>
+            <div class="query-row">
+              <input id="q" name="q" type="search" placeholder="Type words or a sentence, e.g. 'stolen flannel shoebox' or 'Bayes theorem'..."
+                     autocorrect="off" autocapitalize="none" spellcheck="false" enterkeyhint="search" autofocus>
+              <button type="submit" class="primary">Run</button>
+              <button type="button" id="clear-btn">Clear</button>
+            </div>
+          </div>
+
+          <fieldset class="filters">
+            <legend>Filters</legend>
+            <div class="field" style="flex:1 1 130px;">
+              <label class="flbl" for="part-select">Vector Part</label>
+              <select id="part-select" name="part">
+                <option value="">All parts (RRF fused)</option>
+                <option value="comment">comment (prose / docstrings)</option>
+                <option value="function_name">function_name (paths / symbols)</option>
+                <option value="function">function (signatures)</option>
+                <option value="filename">filename (file path + overview)</option>
+                <option value="image">image (multimodal)</option>
+              </select>
+            </div>
+            <div class="field" style="flex:1 1 115px;">
+              <label class="flbl" for="lang-select">Language</label>
+              <select id="lang-select" name="lang">
+                <option value="">All languages</option>
+                <option value="json">json</option>
+                <option value="markdown">markdown</option>
+                <option value="python">python</option>
+                <option value="typescript">typescript</option>
+                <option value="javascript">javascript</option>
+                <option value="html">html</option>
+                <option value="text">text</option>
+                <option value="pdf">pdf</option>
+              </select>
+            </div>
+            <div class="chip-group" id="kind-checks" aria-label="Node kind filter"></div>
+            <div class="chip-group" id="mode-checks" aria-label="Search mode">
+              <label class="toggle-pill"><input type="checkbox" id="opt-any"> any word (OR)</label>
+              <label class="toggle-pill"><input type="checkbox" id="opt-strict"> strict keyword</label>
+              <label class="toggle-pill"><input type="checkbox" id="opt-nosem"> keyword only</label>
+            </div>
+          </fieldset>
+        </form>
+      </search>
+
+      <div class="telemetry">
+        <span id="status" role="status" aria-live="polite">Ready.</span>
+        <span id="token-strip" class="chip-group"></span>
+        <span id="timing-strip" style="margin-inline-start:auto;"></span>
+      </div>
+
+      <div class="scroll-pane" id="results">
+        <div class="empty-state">Select an index above, inspect the parsed file on the right, and type keywords or a sentence to see what matches and why.</div>
+      </div>
+    </section>
+
+    <section class="pane-graph" aria-label="Relation and breakdown graph">
+      <div class="graph-bar">
+        <button type="button" id="g-file" title="Show every parsed node and relation for the active file">File Tree</button>
+        <button type="button" id="g-docs" title="Index-wide docs & JSON overview">Docs</button>
+        <button type="button" id="g-runtime" title="Index-wide runtime code overview">Runtime</button>
+        <button type="button" id="g-hit" title="Center graph on selected node">Hit Focus</button>
+        <button type="button" id="g-d1" aria-pressed="true">d=1</button>
+        <button type="button" id="g-d2" aria-pressed="false">d=2</button>
+        <button type="button" id="g-d3" aria-pressed="false">d=3</button>
+        <span id="gstat" style="margin-inline-start:auto; font-size:0.74rem; color:var(--fg-muted);"></span>
+      </div>
+      <div id="graph"></div>
+      <div class="graph-foot">
+        <div class="legend" id="legend"></div>
+        <span>Click node = inspect | Double-click = expand 1 hop</span>
+      </div>
+    </section>
   </div>
-  <div id="status">type a query and press Enter. Click a result to see its graph, double-click a graph node to expand it.</div>
-  <div id="results"></div>
-</div>
-<div id="graphwrap">
-  <div id="graphbar">
-    <span class="lbl">overview</span>
-    <button id="ov-runtime" title="Runtime code files (engine, routes, static/js, templates)">runtime</button>
-    <button id="ov-code" title="All code files including tools and tests">all code</button>
-    <button id="ov-docs" title="Documentation and wiki files">docs</button>
-    <span class="lbl">depth</span>
-    <button id="d1">1</button><button id="d2">2</button>
-    <span class="legend" id="legend"></span>
-    <span id="gstat" class="lbl"></span>
-  </div>
-  <div id="graph"></div>
-  <div id="hint">click = inspect code | double-click = expand neighbors | drag = move | scroll = zoom</div>
-</div>
-<div id="inspector">
-  <div id="ihead"><span class="path" id="ipath">no node selected</span>
-    <a class="btn" id="vsl" style="display:none">Open in VS Code</a>
-    <button id="vsb" style="display:none">Open via server</button></div>
-  <div id="code"></div>
-</div>
+
+  <!-- RIGHT COLUMN: 1 full-height row showing Source Matches + Parsed Anatomy + Relations -->
+  <section class="col-right" aria-labelledby="data-title">
+    <div class="data-header">
+      <span class="data-title" id="data-title">No file loaded</span>
+      <span class="data-meta" id="data-meta"></span>
+      <div class="data-actions">
+        <label class="toggle-pill"><input type="checkbox" id="opt-wrap" checked> wrap lines</label>
+        <a class="btn" id="vsl" hidden>Open in VS Code</a>
+        <button type="button" id="vsb" hidden>Open via server</button>
+      </div>
+    </div>
+
+    <div class="tablist" role="tablist" aria-label="Inspector views">
+      <button type="button" role="tab" id="tab-source" aria-selected="true" aria-controls="panel-source">Annotated Data &amp; Matches</button>
+      <button type="button" role="tab" id="tab-anatomy" aria-selected="false" aria-controls="panel-anatomy">Parsed Anatomy (Nodes, FTS, Vectors)</button>
+      <button type="button" role="tab" id="tab-relations" aria-selected="false" aria-controls="panel-relations">Edges &amp; Refs Table</button>
+    </div>
+
+    <div class="banner-selected" id="selected-banner" hidden></div>
+
+    <div class="tab-panel" id="panel-source" role="tabpanel" aria-labelledby="tab-source">
+      <div class="scroll-pane source-view" id="source-lines">
+        <div class="empty-state">Waiting for file inspection data...</div>
+      </div>
+    </div>
+
+    <div class="tab-panel" id="panel-anatomy" role="tabpanel" aria-labelledby="tab-anatomy" hidden>
+      <div class="anatomy-toolbar">
+        <label class="flbl" for="node-filter">Filter nodes:</label>
+        <input type="search" id="node-filter" placeholder="filter path, text, token..." autocorrect="off" autocapitalize="none" spellcheck="false">
+        <label class="toggle-pill"><input type="checkbox" id="only-matched"> matched by query only</label>
+        <label class="toggle-pill"><input type="checkbox" id="hide-sentences"> hide sentence splits</label>
+        <span id="anatomy-count" class="data-meta" style="margin-inline-start:auto;"></span>
+      </div>
+      <div class="scroll-pane anatomy-list" id="anatomy-list"></div>
+    </div>
+
+    <div class="tab-panel" id="panel-relations" role="tabpanel" aria-labelledby="tab-relations" hidden>
+      <div class="scroll-pane" id="relations-wrap" style="flex:1 1 auto;"></div>
+    </div>
+  </section>
+</main>
+
 <script src="/vendor/vis-network.js"></script>
 <script>
-const KIND_COLOR = {file:'#4da3ff', class:'#f2c94c', function:'#6fcf97', method:'#27ae60', variable:'#bb86fc',
-                    comment:'#8b93a1', section:'#f2994a', block:'#56ccf2', element:'#eb5757',
-                    record:'#9b8afb', tag:'#7f8c9b'};
-const EDGE_COLOR = {DEFINES:'#4b5563', CALLS:'#6fcf97', REFERENCES:'#bb86fc', IMPORTS:'#4da3ff',
-                    INHERITS:'#f2c94c', ANNOTATES:'#8b93a1', LINKS_TO:'#f2994a', CONNECTS_TO:'#56ccf2'};
-const state = {kinds:new Set(), langs:new Set(), part:'', any:false, strict:false, depth:1, current:null, nodes:null, edges:null, network:null};
+const KIND_COLOR = {
+  file: '#4da3ff', class: '#f2c94c', function: '#6fcf97', method: '#27ae60',
+  variable: '#bb86fc', comment: '#9ca3af', section: '#f2994a', block: '#56ccf2',
+  element: '#eb5757', record: '#a78bfa', tag: '#94a3b8'
+};
+const EDGE_COLOR = {
+  DEFINES: '#525f73', CALLS: '#6fcf97', REFERENCES: '#bb86fc', IMPORTS: '#4da3ff',
+  INHERITS: '#f2c94c', ANNOTATES: '#9ca3af', LINKS_TO: '#f2994a', CONNECTS_TO: '#38bdf8'
+};
+const KIND_FILTERS = ['section', 'record', 'tag', 'file', 'function', 'class', 'method', 'comment'];
 
-function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+const state = {
+  indexId: '',
+  indexes: [],
+  filePath: '',
+  files: [],
+  inspectData: null,
+  sourceLines: [],
+  sourceStart: 1,
+  sourceEnd: 0,
+  sourceTotal: 0,
+  sourceAbs: '',
+  isImage: false,
+  hits: [],
+  hitById: new Map(),
+  tokens: [],
+  selectedNodeId: null,
+  graphMode: 'file',
+  depth: 1,
+  activeTab: 'source',
+  nodes: null,
+  edges: null,
+  network: null,
+  debounceTimer: null,
+  searchSeq: 0
+};
+
 const $ = id => document.getElementById(id);
-
-function chips(container, items, onToggle, single) {
-  items.forEach(it => {
-    const c = el('span', 'chip', it); c.onclick = () => { onToggle(it, c); }; container.appendChild(c);
-  });
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
 }
-chips($('kinds'), ['file','class','function','method','variable','comment','section','block','record','tag'], (k, c) => {
-  state.kinds.has(k) ? state.kinds.delete(k) : state.kinds.add(k); c.classList.toggle('on'); search(); });
-chips($('langs'), ['python','typescript','javascript','markdown','json','html','text'], (k, c) => {
-  state.langs.has(k) ? state.langs.delete(k) : state.langs.add(k); c.classList.toggle('on'); search(); });
-const partChips = [];
-['filename','function_name','function','comment'].forEach(p => {
-  const c = el('span', 'chip', p); c.onclick = () => {
-    state.part = state.part === p ? '' : p; partChips.forEach(x => x.classList.toggle('on', x.textContent === state.part)); search(); };
-  partChips.push(c); $('parts').appendChild(c); });
-[['any word','any'],['strict','strict']].forEach(([label, key]) => {
-  const c = el('span', 'chip', label); c.title = key === 'any' ? 'keyword list matches ANY word, not all' : 'only keyword matches; vectors just reorder';
-  c.onclick = () => { state[key] = !state[key]; c.classList.toggle('on'); search(); }; $('modes').appendChild(c); });
+
+async function api(url, opts) {
+  const r = await fetch(url, opts);
+  if (!r.ok) {
+    const txt = await r.text().catch(() => '');
+    throw new Error(`${url} -> ${r.status} ${txt.slice(0, 140)}`);
+  }
+  return r.json();
+}
+
+function qsIndex(params) {
+  const p = new URLSearchParams(params || {});
+  if (state.indexId && state.indexId !== '__current__') p.set('index', state.indexId);
+  return p.toString();
+}
+
+// Populate kind toggles using native checkboxes inside labels
+KIND_FILTERS.forEach(k => {
+  const lbl = el('label', 'toggle-pill');
+  const cb = el('input');
+  cb.type = 'checkbox';
+  cb.value = k;
+  cb.name = 'kind';
+  cb.addEventListener('change', () => runSearch());
+  lbl.append(cb, k);
+  $('kind-checks').appendChild(lbl);
+});
 
 $('legend').append(...Object.entries(EDGE_COLOR).map(([k, col]) => {
-  const s = el('span'); const i = el('i'); i.style.background = col; s.append(i, k); return s; }));
+  const s = el('span');
+  const i = el('i');
+  i.style.background = col;
+  s.append(i, k);
+  return s;
+}));
 
-async function api(url, opts) { const r = await fetch(url, opts); if (!r.ok) throw new Error(url + ' -> ' + r.status); return r.json(); }
-
-let seq = 0;
-async function search() {
-  const q = $('q').value.trim(); if (!q) return;
-  const my = ++seq;
-  const p = new URLSearchParams({q, limit: 30});
-  state.kinds.forEach(k => p.append('kind', k)); state.langs.forEach(l => p.append('lang', l));
-  if (state.part) p.set('part', state.part); if (state.any) p.set('any', '1'); if (state.strict) p.set('strict', '1');
-  $('status').textContent = 'searching...';
-  let data;
-  try { data = await api('/api/search?' + p); } catch (e) { $('status').textContent = String(e); return; }
-  if (my !== seq) return;
-  $('status').textContent = data.results.length + ' results' + (data.note ? '  |  keyword only: ' + data.note : '');
-  const box = $('results'); box.replaceChildren();
-  data.results.forEach(h => box.appendChild(renderHit(h)));
+// Tabs with ArrowLeft/ArrowRight keyboard support
+const TABS = [
+  { id: 'tab-source', panel: 'panel-source', key: 'source' },
+  { id: 'tab-anatomy', panel: 'panel-anatomy', key: 'anatomy' },
+  { id: 'tab-relations', panel: 'panel-relations', key: 'relations' }
+];
+function switchTab(tabKey) {
+  state.activeTab = tabKey;
+  TABS.forEach(t => {
+    const active = t.key === tabKey;
+    $(t.id).setAttribute('aria-selected', active ? 'true' : 'false');
+    $(t.panel).hidden = !active;
+  });
 }
+TABS.forEach((t, idx) => {
+  $(t.id).addEventListener('click', () => switchTab(t.key));
+  $(t.id).addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      e.preventDefault();
+      const next = (idx + (e.key === 'ArrowRight' ? 1 : -1) + TABS.length) % TABS.length;
+      $(TABS[next].id).focus();
+      switchTab(TABS[next].key);
+    }
+  });
+});
 
-function relLine(h) {
-  const r = h.relations || {}; const parts = [];
-  for (const k of ['called_by','calls','referenced_by','imports','imported_by','links_to','linked_from','annotates']) {
-    if (r[k]) parts.push(k.replace('_',' ') + ' ' + r[k].count);
+// Highlight token substrings safely without HTML injection
+function buildHighlightedFragment(text, tokens) {
+  const frag = document.createDocumentFragment();
+  if (!text) return frag;
+  const cleanTokens = Array.from(new Set((tokens || []).filter(t => t && t.length >= 2)));
+  if (!cleanTokens.length) {
+    frag.append(text);
+    return frag;
   }
-  return parts.join('  |  ');
+  const esc = cleanTokens.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).sort((a, b) => b.length - a.length);
+  const re = new RegExp(`(${esc.join('|')})`, 'gi');
+  let last = 0;
+  for (const m of text.matchAll(re)) {
+    if (m.index > last) frag.append(text.slice(last, m.index));
+    const mk = el('mark', 'tok-mark', m[0]);
+    frag.append(mk);
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) frag.append(text.slice(last));
+  return frag;
 }
 
-function renderHit(h) {
-  const d = el('div', 'hit'); d.dataset.id = h.id;
-  const t = el('div', 't'); const k = el('span', 'kind', h.kind); k.style.background = KIND_COLOR[h.kind] || '#999';
-  const local = h.qualified_name.includes('::') ? h.qualified_name.split('::').slice(1).join('::') : h.name;
-  t.append(k, el('span', 'name', local || h.file)); d.appendChild(t);
-  d.appendChild(el('div', 'loc', h.file + ':' + h.line_start + (h.line_end !== h.line_start ? '-' + h.line_end : '')));
-  if (h.signature && h.kind !== 'file') d.appendChild(el('div', 'loc', h.signature));
-  if (h.docstring) d.appendChild(el('div', 'doc', h.docstring));
-  const rl = relLine(h); if (rl) d.appendChild(el('div', 'rel', rl));
-  d.appendChild(el('div', 'matched', h.matched.join(', ') + '  score ' + h.score));
-  d.onclick = () => { document.querySelectorAll('.hit.sel').forEach(x => x.classList.remove('sel')); d.classList.add('sel'); focusNode(h.id); };
-  return d;
+function getSelectedKinds() {
+  return Array.from($('kind-checks').querySelectorAll('input:checked')).map(c => c.value);
 }
 
-function fileColor(rel) {
-  if (rel.startsWith('engine/')) return '#27ae60';
-  if (rel.startsWith('routes/')) return '#f2994a';
-  if (rel.startsWith('static/')) return '#4da3ff';
-  if (rel.startsWith('templates/')) return '#eb5757';
-  if (rel.startsWith('docs/')) return '#f2c94c';
-  if (rel.startsWith('tools/') || rel.startsWith('tests/')) return '#bb86fc';
-  return '#56ccf2';
+// IME-safe Enter submit + debounced live Regex-Tester reactivity
+$('q').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    if (e.isComposing || e.keyCode === 229) return;
+    runSearch(true);
+  }
+});
+$('q').addEventListener('input', () => {
+  clearTimeout(state.debounceTimer);
+  state.debounceTimer = setTimeout(() => runSearch(), 220);
+});
+$('search-form').addEventListener('submit', e => {
+  e.preventDefault();
+  runSearch(true);
+});
+$('clear-btn').addEventListener('click', () => {
+  $('q').value = '';
+  state.hits = [];
+  state.hitById.clear();
+  state.tokens = [];
+  $('token-strip').replaceChildren();
+  $('timing-strip').textContent = '';
+  $('status').textContent = 'Query cleared.';
+  $('results').replaceChildren(el('div', 'empty-state', 'Type keywords or a natural-language sentence above to test retrieval against this index.'));
+  $('selected-banner').hidden = true;
+  refreshVisualMatches();
+});
+['part-select', 'lang-select', 'opt-any', 'opt-strict', 'opt-nosem'].forEach(id => {
+  $(id).addEventListener('change', () => runSearch(true));
+});
+
+$('index-select').addEventListener('change', async () => {
+  state.indexId = $('index-select').value;
+  await onIndexChanged();
+});
+
+$('file-select').addEventListener('change', async () => {
+  state.filePath = $('file-select').value;
+  await loadInspectedFile(state.filePath);
+  if (state.graphMode === 'file') await loadFileGraph(state.filePath);
+});
+
+$('opt-wrap').addEventListener('change', () => {
+  $('source-lines').classList.toggle('nowrap', !$('opt-wrap').checked);
+});
+['node-filter', 'only-matched', 'hide-sentences'].forEach(id => {
+  const evt = id === 'node-filter' ? 'input' : 'change';
+  $(id).addEventListener(evt, () => renderAnatomy());
+});
+
+async function loadIndexes() {
+  const data = await api('/api/indexes');
+  state.indexes = data.indexes || [];
+  const sel = $('index-select');
+  sel.replaceChildren();
+  let preferred = data.active_id || (state.indexes[0] && state.indexes[0].id) || '';
+  const urlIdx = new URLSearchParams(location.search).get('index');
+  if (urlIdx && state.indexes.some(x => x.id === urlIdx)) preferred = urlIdx;
+  state.indexes.forEach(idx => {
+    const opt = el('option', null, `${idx.id} (${idx.ready ? idx.db_mb + ' MB' : 'not indexed'})`);
+    opt.value = idx.id;
+    opt.disabled = !idx.ready && idx.id !== preferred;
+    sel.appendChild(opt);
+  });
+  sel.value = preferred;
+  state.indexId = sel.value;
 }
 
+async function onIndexChanged() {
+  const [st, fdata] = await Promise.all([
+    api('/api/stats?' + qsIndex()),
+    api('/api/files?' + qsIndex({ limit: 400 }))
+  ]);
+  const parts = Object.entries(st.vectors_by_part || {}).map(([k, v]) => `${k}:${v}`).join(' ');
+  $('stats-pill').textContent = `${st.files} files | ${st.nodes} nodes | ${st.edges} edges | vec [${parts || 'none'}]`;
+
+  state.files = fdata.files || [];
+  const fsel = $('file-select');
+  fsel.replaceChildren();
+  state.files.forEach(f => {
+    const opt = el('option', null, `${f.rel_path} (${f.language}, ${f.node_count} nodes)`);
+    opt.value = f.rel_path;
+    fsel.appendChild(opt);
+  });
+  state.filePath = state.files[0] ? state.files[0].rel_path : '';
+  if (state.filePath) {
+    fsel.value = state.filePath;
+    await loadInspectedFile(state.filePath);
+    if (state.files.length <= 5 || state.graphMode === 'file') {
+      state.graphMode = 'file';
+      await loadFileGraph(state.filePath);
+    } else {
+      await loadOverview('runtime');
+    }
+  } else {
+    state.inspectData = null;
+    $('data-title').textContent = 'No indexed files in this index';
+    $('source-lines').replaceChildren(el('div', 'empty-state', 'Run codesearch index on this folder first.'));
+    $('anatomy-list').replaceChildren();
+    $('relations-wrap').replaceChildren();
+  }
+  if ($('q').value.trim()) await runSearch(true);
+}
+
+async function loadInspectedFile(relPath, startLine = 1) {
+  if (!relPath) return;
+  const lo = Math.max(1, startLine);
+  const [insp, code] = await Promise.all([
+    api('/api/inspect?' + qsIndex({ path: relPath, limit: 400 })),
+    api('/api/code?' + qsIndex({ path: relPath, start: lo, end: lo + 1999, context: 0 }))
+  ]);
+  state.inspectData = insp;
+  state.isImage = Boolean(code.image);
+  state.sourceLines = code.lines || [];
+  state.sourceStart = code.start || 1;
+  state.sourceEnd = code.end || 0;
+  state.sourceTotal = code.total || 0;
+  state.sourceAbs = code.absolute || '';
+
+  const f = insp.file || {};
+  const totalNodes = insp.total_nodes ?? f.node_count ?? (insp.nodes || []).length;
+  $('data-title').textContent = f.rel_path || relPath;
+  $('data-meta').textContent =
+    `${f.language || ''} | ${f.lines || state.sourceTotal || 0} lines | ${totalNodes} nodes` +
+    (insp.truncated ? ` (anatomy shows first ${(insp.nodes || []).length})` : '') +
+    ` | ${(insp.edges || []).length} edges | ${(insp.refs || []).length} raw refs`;
+
+  if (state.sourceAbs) {
+    const absNorm = state.sourceAbs.replace(/\\/g, '/');
+    const a = $('vsl');
+    a.href = 'vscode://file/' + absNorm + ':1:1';
+    a.hidden = false;
+    $('vsb').hidden = false;
+    $('vsb').onclick = async () => {
+      try {
+        const res = await fetch('/api/open', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: relPath, line: 1, index: state.indexId })
+        });
+        const j = await res.json();
+        $('status').textContent = j.ok ? `Opened ${j.opened}` : j.error;
+      } catch (err) {
+        $('status').textContent = String(err);
+      }
+    };
+  }
+  renderSourceView();
+  renderAnatomy();
+  renderRelationsTable();
+}
+
+async function runSearch(immediate) {
+  const q = $('q').value.trim();
+  if (!q) {
+    if (immediate) $('status').textContent = 'Type a query to run search.';
+    return;
+  }
+  const mySeq = ++state.searchSeq;
+  const params = new URLSearchParams({ q, limit: '30' });
+  if (state.indexId && state.indexId !== '__current__') params.set('index', state.indexId);
+  getSelectedKinds().forEach(k => params.append('kind', k));
+  const lang = $('lang-select').value;
+  if (lang) params.append('lang', lang);
+  const part = $('part-select').value;
+  if (part) params.set('part', part);
+  if ($('opt-any').checked) params.set('any', '1');
+  if ($('opt-strict').checked) params.set('strict', '1');
+  if ($('opt-nosem').checked) params.set('semantic', '0');
+
+  $('status').textContent = 'Searching...';
+  let data;
+  try {
+    data = await api('/api/search?' + params.toString());
+  } catch (err) {
+    $('status').textContent = String(err);
+    return;
+  }
+  if (mySeq !== state.searchSeq) return;
+
+  state.hits = data.results || [];
+  state.hitById = new Map(state.hits.map((h, i) => [h.id, { hit: h, rank: i + 1 }]));
+  state.tokens = data.tokens || [];
+
+  const t = data.timings || {};
+  $('status').textContent = `${state.hits.length} shown (${data.total_matched || state.hits.length} total)` + (data.note ? ` | keyword fallback: ${data.note}` : '');
+  const tStrip = $('token-strip');
+  tStrip.replaceChildren();
+  if (state.tokens.length) {
+    tStrip.appendChild(el('span', null, 'tokens:'));
+    state.tokens.forEach(tok => tStrip.appendChild(el('span', 'tok-pill', tok)));
+  }
+  const tParts = [];
+  if (t.kw_ms != null) tParts.push(`kw ${t.kw_ms}ms`);
+  if (t.embed_query_ms != null) tParts.push(`embed ${t.embed_query_ms}ms`);
+  if (t.vec_dot_ms != null) tParts.push(`vec ${t.vec_dot_ms}ms`);
+  if (t.total_ms != null) tParts.push(`total ${t.total_ms}ms`);
+  $('timing-strip').textContent = tParts.join(' | ');
+
+  renderResults();
+  refreshVisualMatches();
+}
+
+function renderResults() {
+  const box = $('results');
+  box.replaceChildren();
+  if (!state.hits.length) {
+    box.appendChild(el('div', 'empty-state', 'No matching nodes under the current filters.'));
+    return;
+  }
+  state.hits.forEach((h, idx) => {
+    const card = el('div', 'hit' + (state.selectedNodeId === h.id ? ' sel' : ''));
+    card.dataset.id = h.id;
+    const head = el('div', 'hit-head');
+    head.appendChild(el('span', 'rank-num', `#${idx + 1}`));
+    const kb = el('span', 'kind-badge', h.kind);
+    kb.style.background = KIND_COLOR[h.kind] || '#999';
+    head.appendChild(kb);
+    const localName = h.qualified_name.includes('::') ? h.qualified_name.split('::').slice(1).join('::') : h.name;
+    head.appendChild(el('span', 'hit-name', localName || h.file));
+    head.appendChild(el('span', 'hit-loc', `${h.file}:L${h.line_start}${h.line_end !== h.line_start ? '-' + h.line_end : ''}`));
+    card.appendChild(head);
+
+    if (h.docstring || h.source) {
+      const snip = el('div', 'hit-doc');
+      snip.appendChild(buildHighlightedFragment((h.docstring || h.source || '').slice(0, 320), state.tokens));
+      card.appendChild(snip);
+    }
+
+    const why = el('div', 'hit-why');
+    const ranks = h.ranks || {};
+    const rankEntries = Object.entries(ranks);
+    if (rankEntries.length) {
+      rankEntries.forEach(([srcName, info]) => {
+        why.appendChild(el('span', 'match-pill', `${srcName} #${info.rank} (${info.raw})`));
+      });
+    } else {
+      (h.matched || []).forEach(m => why.appendChild(el('span', 'match-pill', m)));
+    }
+    why.appendChild(el('span', 'rel-summary', `RRF ${h.score}`));
+    card.appendChild(why);
+
+    card.addEventListener('click', () => selectHitOrNode(h));
+    box.appendChild(card);
+  });
+}
+
+async function selectHitOrNode(h) {
+  state.selectedNodeId = h.id;
+  document.querySelectorAll('.hit.sel').forEach(x => x.classList.remove('sel'));
+  const hitCard = $('results').querySelector(`.hit[data-id="${h.id}"]`);
+  if (hitCard) hitCard.classList.add('sel');
+
+  const targetFile = h.file;
+  const hitLn = h.line_start || 1;
+  if (targetFile && targetFile !== state.filePath) {
+    state.filePath = targetFile;
+    if ($('file-select').querySelector(`option[value="${CSS.escape(targetFile)}"]`)) {
+      $('file-select').value = targetFile;
+    }
+    await loadInspectedFile(targetFile, Math.max(1, hitLn - 150));
+  } else if (hitLn < state.sourceStart || hitLn > state.sourceEnd) {
+    const lo = Math.max(1, hitLn - 150);
+    const code = await api('/api/code?' + qsIndex({ path: state.filePath, start: lo, end: lo + 999, context: 0 }));
+    if (!code.image) {
+      state.sourceLines = code.lines || [];
+      state.sourceStart = code.start || lo;
+      state.sourceEnd = code.end || lo;
+      state.sourceTotal = code.total || state.sourceTotal;
+    }
+  }
+  updateSelectedBanner(h.id);
+  refreshVisualMatches();
+  scrollSourceAndAnatomyToNode(h.id);
+  await focusGraphNode(h.id);
+}
+
+function updateSelectedBanner(nodeId) {
+  const banner = $('selected-banner');
+  const nodes = state.inspectData ? state.inspectData.nodes : [];
+  const inspNode = nodes.find(n => n.id === nodeId);
+  const hitEntry = state.hitById.get(nodeId);
+  if (!inspNode && !hitEntry) {
+    banner.hidden = true;
+    return;
+  }
+  const n = inspNode || hitEntry.hit;
+  banner.replaceChildren();
+  const row1 = el('div', 'hit-head');
+  const kb = el('span', 'kind-badge', n.kind);
+  kb.style.background = KIND_COLOR[n.kind] || '#999';
+  row1.append(kb, el('span', 'hit-name', `#${nodeId} ${n.qualified_name}`));
+  if (hitEntry) {
+    Object.entries(hitEntry.hit.ranks || {}).forEach(([k, info]) => {
+      row1.appendChild(el('span', 'match-pill', `${k} #${info.rank} raw=${info.raw}`));
+    });
+  }
+  banner.appendChild(row1);
+  if (inspNode) {
+    const pNames = inspNode.parts.length
+      ? inspNode.parts.map(p => `${p.part}: ${p.embedded ? p.vectors.map(v => `${v.model}(${v.dim}d)`).join(',') : 'pending'}`).join(' | ')
+      : 'KEYWORD-ONLY (no vectors emitted for record/tag)';
+    banner.appendChild(el('div', 'data-meta', `FTS words: "${inspNode.fts_words || '(none)'}"  |  Vectors: ${pNames}`));
+  }
+  banner.hidden = false;
+}
+
+function renderSourceView() {
+  const box = $('source-lines');
+  box.replaceChildren();
+  if (state.isImage && state.filePath) {
+    const img = el('img');
+    img.src = '/api/image?' + qsIndex({ path: state.filePath });
+    img.alt = state.filePath;
+    img.style.cssText = 'max-width:100%; height:auto; display:block; margin:1rem auto; border-radius:6px;';
+    box.appendChild(img);
+    return;
+  }
+  if (!state.sourceLines.length) {
+    box.appendChild(el('div', 'empty-state', 'No source lines available.'));
+    return;
+  }
+  const nodes = state.inspectData ? state.inspectData.nodes : [];
+  const nodesByLine = new Map();
+  nodes.forEach(n => {
+    if (n.kind === 'file') return;
+    const ls = n.lines[0];
+    if (!nodesByLine.has(ls)) nodesByLine.set(ls, []);
+    nodesByLine.get(ls).push(n);
+  });
+
+  const selectedNode = nodes.find(n => n.id === state.selectedNodeId);
+
+  state.sourceLines.forEach((lineText, idx) => {
+    const lnNum = (state.sourceStart || 1) + idx;
+    const lineNodes = nodesByLine.get(lnNum) || [];
+    const anyHitOnLine = state.hits.some(h => h.file === state.filePath && lnNum >= h.line_start && lnNum <= h.line_end);
+    const isFocus = selectedNode && lnNum >= selectedNode.lines[0] && lnNum <= selectedNode.lines[1];
+
+    const row = el('div', 'src-line' + (anyHitOnLine ? ' line-hit' : '') + (isFocus ? ' line-focus' : ''));
+    row.dataset.line = lnNum;
+    row.appendChild(el('span', 'ln-num', String(lnNum)));
+
+    const codeCell = el('span', 'ln-code');
+    if (isFocus && selectedNode.docstring && lineText.includes(selectedNode.docstring)) {
+      const pos = lineText.indexOf(selectedNode.docstring);
+      const before = lineText.slice(0, pos);
+      const matchStr = lineText.slice(pos, pos + selectedNode.docstring.length);
+      const after = lineText.slice(pos + selectedNode.docstring.length);
+      codeCell.appendChild(buildHighlightedFragment(before, state.tokens));
+      const focusMark = el('mark', 'hit-mark');
+      focusMark.appendChild(buildHighlightedFragment(matchStr, state.tokens));
+      codeCell.appendChild(focusMark);
+      codeCell.appendChild(buildHighlightedFragment(after, state.tokens));
+    } else {
+      codeCell.appendChild(buildHighlightedFragment(lineText, state.tokens));
+    }
+    row.appendChild(codeCell);
+
+    if (lineNodes.length) {
+      const tagsWrap = el('span', 'ln-tags');
+      lineNodes.slice(0, 6).forEach(n => {
+        const hitInfo = state.hitById.get(n.id);
+        const shortLabel = n.kind === 'section' && n.name.includes(' sentence ')
+          ? `${n.qualified_name.split('::').slice(-1)[0]}`
+          : `${n.kind.slice(0, 3).toUpperCase()} ${n.name.slice(0, 20)}`;
+        const btn = el('button', 'mini-node-btn', (hitInfo ? `#${hitInfo.rank} ` : '') + shortLabel);
+        btn.type = 'button';
+        btn.style.borderColor = KIND_COLOR[n.kind] || 'var(--border)';
+        if (hitInfo) btn.classList.add('primary');
+        btn.title = `${n.kind}: ${n.qualified_name}`;
+        btn.addEventListener('click', () => inspectParsedNode(n.id));
+        tagsWrap.appendChild(btn);
+      });
+      if (lineNodes.length > 6) tagsWrap.appendChild(el('span', 'data-meta', `+${lineNodes.length - 6}`));
+      row.appendChild(tagsWrap);
+    }
+    box.appendChild(row);
+  });
+}
+
+function renderAnatomy() {
+  const box = $('anatomy-list');
+  box.replaceChildren();
+  const nodes = state.inspectData ? state.inspectData.nodes : [];
+  const needle = $('node-filter').value.trim().toLowerCase();
+  const onlyMatched = $('only-matched').checked;
+  const hideSent = $('hide-sentences').checked;
+
+  const edgeByNode = new Map();
+  (state.inspectData?.edges || []).forEach(e => {
+    edgeByNode.set(e.source_id, [...(edgeByNode.get(e.source_id) || []), `-> [${e.kind}] #${e.target_id} ${e.target_qname}`]);
+    edgeByNode.set(e.target_id, [...(edgeByNode.get(e.target_id) || []), `<- [${e.kind}] #${e.source_id} ${e.source_qname}`]);
+  });
+
+  const filtered = nodes.filter(n => {
+    if (hideSent && n.kind === 'section' && n.name.includes(' sentence ')) return false;
+    if (onlyMatched && !state.hitById.has(n.id)) return false;
+    if (!needle) return true;
+    return (n.qualified_name + ' ' + (n.docstring || '') + ' ' + (n.fts_words || '')).toLowerCase().includes(needle);
+  });
+
+  // Sort matched hits to top when query exists unless user didn't search
+  const ordered = [...filtered].sort((a, b) => {
+    const ha = state.hitById.get(a.id)?.rank ?? 999999;
+    const hb = state.hitById.get(b.id)?.rank ?? 999999;
+    if (ha !== hb) return ha - hb;
+    return a.id - b.id;
+  });
+
+  const totalNodes = state.inspectData?.total_nodes ?? nodes.length;
+  $('anatomy-count').textContent = state.inspectData?.truncated
+    ? `${ordered.length} shown of ${totalNodes} total (loaded first ${nodes.length})`
+    : `${ordered.length} / ${nodes.length} nodes`;
+
+  ordered.forEach(n => {
+    const hitInfo = state.hitById.get(n.id);
+    const card = el('article', 'node-card' + (n.id === state.selectedNodeId ? ' card-focus' : '') + (hitInfo ? ' card-matched' : ''));
+    card.dataset.nodeId = n.id;
+
+    const head = el('div', 'nc-head');
+    const kb = el('span', 'kind-badge', n.kind);
+    kb.style.background = KIND_COLOR[n.kind] || '#999';
+    head.appendChild(kb);
+    head.appendChild(el('span', 'nc-id', `#${n.id} L${n.lines[0]}-${n.lines[1]}`));
+    head.appendChild(el('span', 'nc-qname', n.qualified_name));
+    if (hitInfo) {
+      head.appendChild(el('span', 'match-pill', `MATCH #${hitInfo.rank} (RRF ${hitInfo.hit.score})`));
+      Object.entries(hitInfo.hit.ranks || {}).forEach(([k, info]) => {
+        head.appendChild(el('span', 'match-pill', `${k}: #${info.rank} (${info.raw})`));
+      });
+    }
+    const focusBtn = el('button', null, 'Focus in Graph');
+    focusBtn.type = 'button';
+    focusBtn.style.marginInlineStart = 'auto';
+    focusBtn.addEventListener('click', () => inspectParsedNode(n.id, false));
+    head.appendChild(focusBtn);
+    card.appendChild(head);
+
+    const kv = el('div', 'kv-grid');
+    if (n.signature) {
+      const r = el('div', 'kv-row');
+      r.append(el('span', 'kv-k', 'Signature'), el('span', 'kv-v', n.signature));
+      kv.appendChild(r);
+    }
+    if (n.docstring || n.source) {
+      const r = el('div', 'kv-row');
+      const v = el('span', 'kv-v');
+      v.appendChild(buildHighlightedFragment(n.docstring || n.source || '', state.tokens));
+      r.append(el('span', 'kv-k', n.kind === 'record' ? 'Schema Shape' : 'Stored Text'), v);
+      kv.appendChild(r);
+    }
+    if (n.fts_words) {
+      const r = el('div', 'kv-row');
+      const v = el('span', 'kv-v');
+      v.appendChild(buildHighlightedFragment(n.fts_words, state.tokens));
+      r.append(el('span', 'kv-k', 'FTS5 Words'), v);
+      kv.appendChild(r);
+    }
+    card.appendChild(kv);
+
+    if (n.parts && n.parts.length) {
+      n.parts.forEach(p => {
+        const pb = el('div', 'part-box');
+        const pm = el('div', 'part-meta');
+        pm.appendChild(el('span', 'part-badge', `part[${p.part}]`));
+        const vecTxt = p.vectors.length ? p.vectors.map(v => `${v.model} (${v.dim}d)`).join(', ') : 'NOT EMBEDDED yet';
+        pm.appendChild(el('span', p.vectors.length ? 'vec-ok' : 'vec-none', vecTxt));
+        pb.appendChild(pm);
+        const pt = el('div', 'kv-v');
+        pt.appendChild(buildHighlightedFragment(p.text, state.tokens));
+        pb.appendChild(pt);
+        card.appendChild(pb);
+      });
+    } else {
+      card.appendChild(el('div', 'data-meta', 'Vectors: KEYWORD-ONLY (record/tag nodes are indexed in FTS5 only so scalars never outrank prose vectors)'));
+    }
+
+    const rels = edgeByNode.get(n.id) || [];
+    if (rels.length) {
+      const r = el('div', 'kv-row');
+      r.append(el('span', 'kv-k', `Edges (${rels.length})`), el('span', 'kv-v', rels.slice(0, 12).join('\n')));
+      kv.appendChild(r);
+    }
+    box.appendChild(card);
+  });
+}
+
+function renderRelationsTable() {
+  const wrap = $('relations-wrap');
+  wrap.replaceChildren();
+  const edges = state.inspectData?.edges || [];
+  const refs = state.inspectData?.refs || [];
+  if (!edges.length && !refs.length) {
+    wrap.appendChild(el('div', 'empty-state', 'No edges or refs found for this file.'));
+    return;
+  }
+
+  const tbl = el('table', 'rel-table');
+  const cap = el('caption', null, `Resolved edges (${edges.length}) and raw refs (${refs.length})`);
+  tbl.appendChild(cap);
+  const thead = el('thead');
+  const hr = el('tr');
+  ['Relation Kind', 'Source Node', 'Target Node', 'Meta / Qualifier'].forEach(col => {
+    const th = el('th', null, col);
+    th.scope = 'col';
+    hr.appendChild(th);
+  });
+  thead.appendChild(hr);
+  tbl.appendChild(thead);
+
+  const tbody = el('tbody');
+  edges.forEach(e => {
+    const tr = el('tr');
+    tr.append(el('td', null, e.kind));
+    const sBtn = el('button', 'mini-node-btn', `#${e.source_id} ${e.source_qname.split('::').slice(1).join('::') || e.source_qname}`);
+    sBtn.type = 'button';
+    sBtn.addEventListener('click', () => inspectParsedNode(e.source_id));
+    const sTd = el('td'); sTd.appendChild(sBtn); tr.appendChild(sTd);
+
+    const tBtn = el('button', 'mini-node-btn', `#${e.target_id} ${e.target_qname.split('::').slice(1).join('::') || e.target_qname}`);
+    tBtn.type = 'button';
+    tBtn.addEventListener('click', () => inspectParsedNode(e.target_id));
+    const tTd = el('td'); tTd.appendChild(tBtn); tr.appendChild(tTd);
+
+    tr.appendChild(el('td', null, e.meta || '-'));
+    tbody.appendChild(tr);
+  });
+  refs.forEach(r => {
+    const tr = el('tr');
+    tr.append(el('td', null, `RAW REF (${r.kind})`), el('td', null, `#${r.source_id} ${r.source_qname}`), el('td', null, r.target), el('td', null, r.qualifier || r.meta || '-'));
+    tbody.appendChild(tr);
+  });
+  tbl.appendChild(tbody);
+  wrap.appendChild(tbl);
+}
+
+function inspectParsedNode(nodeId, jumpToAnatomy = false) {
+  state.selectedNodeId = nodeId;
+  updateSelectedBanner(nodeId);
+  refreshVisualMatches();
+  scrollSourceAndAnatomyToNode(nodeId);
+  if (jumpToAnatomy) switchTab('anatomy');
+  focusGraphNode(nodeId);
+}
+
+function scrollSourceAndAnatomyToNode(nodeId) {
+  const n = state.inspectData?.nodes?.find(x => x.id === nodeId);
+  if (n) {
+    const lineEl = $('source-lines').querySelector(`.src-line[data-line="${n.lines[0]}"]`);
+    if (lineEl) lineEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+  const cardEl = $('anatomy-list').querySelector(`.node-card[data-node-id="${nodeId}"]`);
+  if (cardEl) cardEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
+function refreshVisualMatches() {
+  renderSourceView();
+  renderAnatomy();
+  highlightGraphHits();
+}
+
+// Graph rendering via bundled vis-network
 function nodeVis(n) {
   const local = n.qualified_name.includes('::') ? n.qualified_name.split('::').slice(1).join('::') : '';
   const base = (n.kind === 'file' ? n.file.split('/').pop() : (n.name || local || n.kind + '@' + n.line_start)).toString();
-  const bg = n.kind === 'file' ? fileColor(n.file) : (KIND_COLOR[n.kind] || '#999');
-  return {id: n.id, label: base.length > 34 ? base.slice(0, 33) + '...' : base, title: n.kind + ' ' + (local || n.file) + '\n' + n.file + ':' + n.line_start,
-          color: {background: bg, border: '#000'}, font: {color: n.kind === 'comment' ? '#d7dae0' : '#111', size: 12},
-          shape: n.kind === 'file' ? 'box' : (n.kind === 'comment' ? 'dot' : 'ellipse'), _meta: n};
+  const isMatch = state.hitById.has(n.id);
+  const bg = KIND_COLOR[n.kind] || '#999';
+  return {
+    id: n.id,
+    label: (isMatch ? `#${state.hitById.get(n.id).rank} ` : '') + (base.length > 30 ? base.slice(0, 29) + '...' : base),
+    title: `${n.kind}: ${local || n.file}\n${n.file}:L${n.line_start}` + (isMatch ? `\nMATCH #${state.hitById.get(n.id).rank}` : ''),
+    color: { background: bg, border: isMatch ? '#fde047' : '#0b0e13', highlight: { background: bg, border: '#ffffff' } },
+    borderWidth: isMatch ? 4 : 1.5,
+    font: { color: n.kind === 'comment' ? '#e5e7eb' : '#0b0e13', size: isMatch ? 13 : 11 },
+    shape: n.kind === 'file' ? 'box' : (n.kind === 'record' ? 'diamond' : (n.kind === 'tag' ? 'dot' : 'ellipse'))
+  };
 }
 function edgeVis(e) {
   const isOv = String(e.id).startsWith('ov_');
-  return {id: e.id, from: e.from, to: e.to, arrows: 'to',
-          color: {color: EDGE_COLOR[e.kind] || '#666', opacity: isOv ? 0.32 : 0.75},
-          title: e.kind + (e.meta ? ' [' + e.meta + ']' : ''),
-          width: (e.kind === 'DEFINES' || isOv) ? 1 : 2, dashes: e.kind === 'ANNOTATES'};
+  return {
+    id: e.id, from: e.from, to: e.to, arrows: 'to',
+    color: { color: EDGE_COLOR[e.kind] || '#666', opacity: isOv ? 0.38 : 0.8 },
+    title: e.kind + (e.meta ? ` [${e.meta}]` : ''),
+    width: (e.kind === 'DEFINES' || isOv) ? 1 : 2.2,
+    dashes: e.kind === 'ANNOTATES'
+  };
 }
 
 function ensureNetwork() {
   if (state.network) return;
-  state.nodes = new vis.DataSet(); state.edges = new vis.DataSet();
-  state.network = new vis.Network($('graph'), {nodes: state.nodes, edges: state.edges},
-    {physics: {solver: 'forceAtlas2Based', stabilization: {iterations: 120}}, interaction: {hover: true}, layout: {improvedLayout: false}});
-  state.network.on('click', p => { if (p.nodes.length) inspect(p.nodes[0]); });
-  state.network.on('doubleClick', p => { if (p.nodes.length) expand(p.nodes[0]); });
-}
-
-// Merge a neighborhood into the existing datasets in place (one batched update, no rebuild).
-function merge(data) {
-  state.nodes.update(data.nodes.filter(n => !state.nodes.get(n.id)).map(nodeVis));
-  state.edges.update(data.edges.filter(e => !state.edges.get(e.id)).map(edgeVis));
-  $('gstat').textContent = state.nodes.length + ' nodes, ' + state.edges.length + ' edges' + (data.truncated ? '  (neighborhood truncated)' : '');
-}
-
-async function focusNode(id) {
-  ensureNetwork();
-  state.nodes.clear(); state.edges.clear();
-  const data = await api('/api/graph/' + id + '?depth=' + state.depth);
-  merge(data);
-  state.network.once('stabilizationIterationsDone', () => state.network.fit({animation: true}));
-  state.network.selectNodes([id]);
-  inspect(id);
-}
-async function expand(id) { merge(await api('/api/graph/' + id + '?depth=1')); }
-
-async function inspect(id) {
-  const n = await api('/api/node/' + id);
-  state.current = n;
-  const end = n.line_end;
-  $('ipath').textContent = n.file + ':' + n.line_start + (end !== n.line_start ? '-' + end : '') + '   [' + n.kind + '] ' + (n.name || '');
-  let code;
-  try { code = await api('/api/code?path=' + encodeURIComponent(n.file) + '&start=' + n.line_start + '&end=' + end + '&context=2'); }
-  catch (e) { $('code').replaceChildren(el('div', 'loc', 'file not readable: ' + e.message)); return; }
-  const box = $('code'); box.replaceChildren();
-  if (code.image) {
-    const imgWrap = el('div'); imgWrap.style.cssText = 'display:flex; justify-content:center; align-items:center; height:100%; padding:10px; background:#0f1115;';
-    const img = el('img'); img.src = '/api/image?path=' + encodeURIComponent(n.file); img.style.cssText = 'max-width:100%; max-height:100%; object-fit:contain; border-radius:4px;';
-    imgWrap.appendChild(img); box.appendChild(imgWrap);
-  } else {
-    code.lines.forEach((text, i) => {
-      const num = code.start + i; const row = el('div', 'ln' + (num >= code.hit_start && num <= code.hit_end ? ' hit1' : ''));
-      row.append(el('span', 'n', String(num)), el('span', null, text)); box.appendChild(row);
-    });
-    const first = box.querySelector('.hit1'); if (first) box.scrollTop = Math.max(0, first.offsetTop - 40);
+  if (typeof vis === 'undefined') {
+    $('gstat').textContent = 'vis-network failed to load';
+    return;
   }
-  const abs = code.absolute.replace(/\\/g, '/');
-  const a = $('vsl'); a.href = 'vscode://file/' + abs + ':' + n.line_start + ':1'; a.style.display = '';
-  const b = $('vsb'); b.style.display = '';
-  b.onclick = async () => {
-    try { const r = await fetch('/api/open', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({path: n.file, line: n.line_start})});
-          const j = await r.json(); $('status').textContent = j.ok ? 'opened ' + j.opened : j.error; } catch (e) { $('status').textContent = String(e); } };
+  state.nodes = new vis.DataSet();
+  state.edges = new vis.DataSet();
+  state.network = new vis.Network(
+    $('graph'),
+    { nodes: state.nodes, edges: state.edges },
+    { physics: { solver: 'forceAtlas2Based', stabilization: { iterations: 100 } }, interaction: { hover: true }, layout: { improvedLayout: false } }
+  );
+  state.network.on('click', async p => {
+    if (!p.nodes.length) return;
+    const nid = p.nodes[0];
+    const nodeMeta = await api('/api/node/' + nid + '?' + qsIndex());
+    if (nodeMeta.file && nodeMeta.file !== state.filePath) {
+      state.filePath = nodeMeta.file;
+      if ($('file-select').querySelector(`option[value="${CSS.escape(nodeMeta.file)}"]`)) $('file-select').value = nodeMeta.file;
+      await loadInspectedFile(nodeMeta.file);
+    }
+    state.selectedNodeId = nid;
+    updateSelectedBanner(nid);
+    refreshVisualMatches();
+    scrollSourceAndAnatomyToNode(nid);
+  });
+  state.network.on('doubleClick', async p => {
+    if (!p.nodes.length) return;
+    const data = await api('/api/graph/' + p.nodes[0] + '?' + qsIndex({ depth: 1 }));
+    mergeGraphData(data);
+  });
+}
+
+function mergeGraphData(data) {
+  ensureNetwork();
+  if (!state.nodes) return;
+  state.nodes.update((data.nodes || []).filter(n => !state.nodes.get(n.id)).map(nodeVis));
+  state.edges.update((data.edges || []).filter(e => !state.edges.get(e.id)).map(edgeVis));
+  $('gstat').textContent = `${state.nodes.length} nodes, ${state.edges.length} edges` + (data.truncated ? ' (capped)' : '');
+}
+
+function highlightGraphHits() {
+  if (!state.nodes) return;
+  const updates = [];
+  state.nodes.forEach(item => {
+    const m = state.hitById.get(item.id);
+    const shouldBorder = m ? '#fde047' : '#0b0e13';
+    const shouldWidth = m ? 4 : 1.5;
+    if (item.borderWidth !== shouldWidth || (item.color && item.color.border !== shouldBorder)) {
+      updates.push({
+        id: item.id,
+        borderWidth: shouldWidth,
+        color: { ...(item.color || {}), border: shouldBorder }
+      });
+    }
+  });
+  if (updates.length) state.nodes.update(updates);
+}
+
+async function loadFileGraph(relPath) {
+  if (!relPath) return;
+  ensureNetwork();
+  if (!state.nodes) return;
+  state.graphMode = 'file';
+  state.nodes.clear();
+  state.edges.clear();
+  $('gstat').textContent = 'loading file graph...';
+  const data = await api('/api/file_graph?' + qsIndex({ path: relPath, max: 240 }));
+  mergeGraphData(data);
+  highlightGraphHits();
+  if (state.network) {
+    state.network.once('stabilizationIterationsDone', () => state.network.fit({ animation: false }));
+  }
 }
 
 async function loadOverview(scope) {
   ensureNetwork();
-  state.nodes.clear(); state.edges.clear();
-  $('gstat').textContent = 'loading ' + scope + ' overview...';
-  const data = await api('/api/overview?scope=' + encodeURIComponent(scope));
-  merge(data);
-  $('gstat').textContent = 'overview (' + data.scope + '): ' + state.nodes.length + ' files, ' + state.edges.length + ' edges';
-  state.network.stabilize(80);
-  state.network.fit({animation: false});
+  if (!state.nodes) return;
+  state.graphMode = scope;
+  state.nodes.clear();
+  state.edges.clear();
+  $('gstat').textContent = `loading ${scope} overview...`;
+  const data = await api('/api/overview?' + qsIndex({ scope }));
+  mergeGraphData(data);
+  highlightGraphHits();
+  if (state.network) {
+    state.network.stabilize(80);
+    state.network.fit({ animation: false });
+  }
 }
 
-$('q').addEventListener('keydown', e => { if (e.key === 'Enter') search(); });
-[1, 2].forEach(d => { $('d' + d).onclick = () => { state.depth = d; if (state.current) focusNode(state.current.id); }; });
-[['ov-runtime','runtime'],['ov-code','code'],['ov-docs','docs']].forEach(([id, sc]) => { $(id).onclick = () => loadOverview(sc); });
+async function focusGraphNode(id) {
+  ensureNetwork();
+  if (!state.nodes) return;
+  if (state.nodes.get(id)) {
+    state.network.selectNodes([id]);
+    state.network.focus(id, { scale: 1.05, animation: { duration: 250 } });
+    return;
+  }
+  state.nodes.clear();
+  state.edges.clear();
+  const data = await api('/api/graph/' + id + '?' + qsIndex({ depth: state.depth }));
+  mergeGraphData(data);
+  highlightGraphHits();
+  state.network.once('stabilizationIterationsDone', () => {
+    state.network.selectNodes([id]);
+    state.network.fit({ animation: true });
+  });
+}
+
+$('g-file').addEventListener('click', () => loadFileGraph(state.filePath));
+$('g-docs').addEventListener('click', () => loadOverview('docs'));
+$('g-runtime').addEventListener('click', () => loadOverview('runtime'));
+$('g-hit').addEventListener('click', async () => {
+  if (!state.selectedNodeId) return;
+  state.nodes.clear();
+  await focusGraphNode(state.selectedNodeId);
+});
+[1, 2, 3].forEach(d => {
+  $('g-d' + d).addEventListener('click', async () => {
+    state.depth = d;
+    [1, 2, 3].forEach(k => $('g-d' + k).setAttribute('aria-pressed', k === d ? 'true' : 'false'));
+    if (state.selectedNodeId) {
+      state.nodes.clear();
+      await focusGraphNode(state.selectedNodeId);
+    }
+  });
+});
 
 (async function boot() {
-  const params = new URLSearchParams(location.search);
-  if (params.get('depth')) state.depth = Math.max(1, Math.min(2, Number(params.get('depth')) || 1));
-  if (params.get('q')) { $('q').value = params.get('q'); await search(); }
-  const nodeParam = Number(params.get('node'));
-  if (nodeParam) {
-    await focusNode(nodeParam);
-    const exp = (params.get('expand') || '').split(',').map(x => Number(x.trim())).filter(Boolean);
-    for (const eid of exp) await expand(eid);
-  } else {
-    await loadOverview(params.get('overview') || 'runtime');
+  await loadIndexes();
+  await onIndexChanged();
+  const qp = new URLSearchParams(location.search);
+  if (qp.get('q')) {
+    $('q').value = qp.get('q');
+    await runSearch(true);
   }
 })();
 </script>

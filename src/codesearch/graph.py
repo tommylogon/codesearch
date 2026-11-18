@@ -108,6 +108,31 @@ def summary(conn, node_id: int, limit: int = 6) -> dict:
     if annby:
         out["annotated_by"] = {"count": len(annby),
                                "items": [f"{r['rel_path']}:{r['line_start']}" for r in annby[:limit]]}
+    parent_row = conn.execute(
+        "SELECT p.kind, p.qualified_name, f.rel_path, p.line_start "
+        "FROM nodes c JOIN nodes p ON p.id = c.parent_id JOIN files f ON f.id = p.file_id "
+        "WHERE c.id = ? AND p.kind != 'file'",
+        (node_id,),
+    ).fetchone()
+    if parent_row is not None:
+        out["defined_in"] = {
+            "count": 1,
+            "items": [f"{parent_row['qualified_name'].split('::', 1)[-1]} ({parent_row['rel_path']}:{parent_row['line_start']})"],
+        }
+    child_rows = conn.execute(
+        "SELECT n.kind, n.qualified_name, f.rel_path, n.line_start "
+        "FROM nodes n JOIN files f ON f.id = n.file_id "
+        "WHERE n.parent_id = ? ORDER BY n.line_start, n.id",
+        (node_id,),
+    ).fetchall()
+    if child_rows:
+        out["contains"] = {
+            "count": len(child_rows),
+            "items": [
+                f"{r['qualified_name'].split('::', 1)[-1]} ({r['rel_path']}:{r['line_start']})"
+                for r in child_rows[:limit]
+            ],
+        }
     return out
 
 
@@ -217,14 +242,14 @@ def overview(conn: sqlite3.Connection, scope: str = "runtime") -> dict:
             f"AND f.language IN ('python', 'typescript', 'javascript', 'html') {extra}"
             "ORDER BY f.rel_path").fetchall()
         doc_count = conn.execute(
-            "SELECT COUNT(*) FROM files WHERE language IN ('markdown', 'text', 'json')").fetchone()[0]
+            "SELECT COUNT(*) FROM files WHERE language IN ('markdown', 'text', 'json', 'pdf')").fetchone()[0]
         if not rows or (len(rows) <= 5 and doc_count > len(rows) * 2):
             # Prose-primary folder (e.g. a story/notes repo with .md/.json and a few helper scripts): fall back to docs
             scope = "docs"
     if scope == "docs":
         rows = conn.execute(
             f"SELECT {NODE_COLS}, n.file_id {NODE_FROM} WHERE n.kind = 'file' "
-            "AND f.language IN ('markdown', 'text', 'json') "
+            "AND f.language IN ('markdown', 'text', 'json', 'pdf') "
             "AND f.rel_path NOT LIKE 'docs/virtualWorld/dev_tasks/%' "
             "AND f.rel_path NOT LIKE 'data/library/items/%' "
             "AND f.rel_path NOT LIKE 'data/library/tags/%' "
@@ -273,6 +298,7 @@ def overview(conn: sqlite3.Connection, scope: str = "runtime") -> dict:
         if len(edges) < 3 and len(nodes) <= 200:
             sec_rows = conn.execute(
                 f"SELECT {NODE_COLS}, n.file_id {NODE_FROM} WHERE n.kind = 'section' "
+                "AND n.parent_id IS NULL "
                 "ORDER BY f.rel_path, n.line_start LIMIT 200").fetchall()
             for sr in sec_rows:
                 fnode = file_to_node.get(sr["file_id"])
@@ -287,4 +313,187 @@ def overview(conn: sqlite3.Connection, scope: str = "runtime") -> dict:
         nodes = [n for n in nodes if n["id"] in connected_ids]
 
     return {"scope": scope, "nodes": nodes, "edges": edges, "truncated": False}
+
+
+def resolve_inspect_files(conn: sqlite3.Connection, path_arg: str | None) -> list:
+    """Return file rows matching `path_arg`, or all indexed files when omitted."""
+    cols = "id, rel_path, language, hash, mtime, lines"
+    if not path_arg:
+        return conn.execute(f"SELECT {cols} FROM files ORDER BY rel_path").fetchall()
+    needle = path_arg.replace("\\", "/").lstrip("./")
+    exact = conn.execute(f"SELECT {cols} FROM files WHERE rel_path = ?", (needle,)).fetchall()
+    if exact:
+        return exact
+    return conn.execute(
+        f"SELECT {cols} FROM files WHERE rel_path LIKE ? OR rel_path LIKE ? ORDER BY rel_path",
+        (f"%/{needle}", f"%{needle}"),
+    ).fetchall()
+
+
+def inspect_file_payload(
+    conn: sqlite3.Connection,
+    file_row: sqlite3.Row,
+    limit: int | None = None,
+    offset: int = 0,
+) -> dict:
+    """Collect stored nodes (optionally paged), vector parts, FTS entries, edges, and refs for one file."""
+    from . import embedder
+
+    fid = file_row["id"]
+    total_nodes = conn.execute("SELECT COUNT(*) FROM nodes WHERE file_id = ?", (fid,)).fetchone()[0]
+    node_sql = (
+        "SELECT n.*, f.rel_path FROM nodes n JOIN files f ON f.id = n.file_id "
+        "WHERE n.file_id = ? ORDER BY n.line_start, n.id"
+    )
+    node_params: tuple = (fid,)
+    if limit is not None:
+        node_sql += " LIMIT ? OFFSET ?"
+        node_params = (fid, max(1, int(limit)), max(0, int(offset)))
+    nodes = conn.execute(node_sql, node_params).fetchall()
+    node_ids = [n["id"] for n in nodes]
+    fts_words: dict[int, str] = {}
+    parts_by_node: dict[int, dict[str, dict]] = {}
+    if node_ids:
+        for i in range(0, len(node_ids), 800):
+            batch = node_ids[i:i + 800]
+            ph = ",".join("?" * len(batch))
+            for r in conn.execute(f"SELECT rowid, words FROM nodes_fts WHERE rowid IN ({ph})", batch):
+                fts_words[r["rowid"]] = r["words"]
+            part_rows = conn.execute(
+                f"SELECT p.node_id, p.part, p.hash, c.model, c.dim FROM node_parts p "
+                f"LEFT JOIN vec_cache c ON c.part = p.part AND c.hash = p.hash "
+                f"WHERE p.node_id IN ({ph}) ORDER BY p.part, c.model",
+                batch,
+            ).fetchall()
+            for r in part_rows:
+                n_parts = parts_by_node.setdefault(r["node_id"], {})
+                entry = n_parts.setdefault(r["part"], {"part": r["part"], "hash": r["hash"], "vectors": []})
+                if r["model"]:
+                    entry["vectors"].append({"model": r["model"], "dim": r["dim"]})
+
+    node_items = []
+    for n in nodes:
+        texts = embedder.part_texts(n)
+        stored_parts = parts_by_node.get(n["id"], {})
+        part_list = []
+        for pname in dict.fromkeys(list(stored_parts.keys()) + list(texts.keys())):
+            info = stored_parts.get(pname, {"part": pname, "hash": None, "vectors": []})
+            part_list.append({
+                "part": pname,
+                "hash": info["hash"],
+                "embedded": bool(info["vectors"]),
+                "vectors": info["vectors"],
+                "text": texts.get(pname, ""),
+            })
+        node_items.append({
+            "id": n["id"],
+            "parent_id": n["parent_id"],
+            "kind": n["kind"],
+            "name": n["name"],
+            "qualified_name": n["qualified_name"],
+            "lines": [n["line_start"], n["line_end"]],
+            "signature": n["signature"],
+            "docstring": n["docstring"],
+            "source": n["source"],
+            "fts_words": fts_words.get(n["id"], ""),
+            "parts": part_list,
+        })
+
+    edge_sql = (
+        "SELECT e.id, e.kind, e.source_id, sn.qualified_name AS source_qname, "
+        "e.target_id, tn.qualified_name AS target_qname, e.meta "
+        "FROM edges e JOIN nodes sn ON sn.id = e.source_id JOIN nodes tn ON tn.id = e.target_id "
+        "WHERE sn.file_id = ? OR tn.file_id = ? ORDER BY e.id"
+    )
+    edge_params: tuple = (fid, fid)
+    ref_sql = (
+        "SELECT r.source_id, sn.qualified_name AS source_qname, r.kind, r.target, r.qualifier, r.meta "
+        "FROM refs r JOIN nodes sn ON sn.id = r.source_id "
+        "WHERE sn.file_id = ? ORDER BY r.id"
+    )
+    ref_params: tuple = (fid,)
+    if limit is not None:
+        rel_cap = max(1000, int(limit) * 4)
+        edge_sql += " LIMIT ?"
+        edge_params = (fid, fid, rel_cap)
+        ref_sql += " LIMIT ?"
+        ref_params = (fid, rel_cap)
+    edge_rows = conn.execute(edge_sql, edge_params).fetchall()
+    ref_rows = conn.execute(ref_sql, ref_params).fetchall()
+    return {
+        "file": {
+            "id": fid,
+            "rel_path": file_row["rel_path"],
+            "language": file_row["language"],
+            "lines": file_row["lines"],
+            "hash": file_row["hash"],
+            "node_count": total_nodes,
+        },
+        "nodes": node_items,
+        "edges": [dict(r) for r in edge_rows],
+        "refs": [dict(r) for r in ref_rows],
+        "total_nodes": total_nodes,
+        "offset": max(0, int(offset)),
+        "truncated": (max(0, int(offset)) + len(node_items)) < total_nodes,
+    }
+
+
+def file_graph(conn: sqlite3.Connection, path_arg: str, max_nodes: int = 240) -> dict:
+    """Build a structural + relational breakdown graph for one file (`DEFINES`, `CONNECTS_TO`, etc.)."""
+    files = resolve_inspect_files(conn, path_arg)
+    if not files:
+        return {"nodes": [], "edges": [], "truncated": False, "file": None}
+    file_row = files[0]
+    fid = file_row["id"]
+    total = conn.execute("SELECT COUNT(*) FROM nodes WHERE file_id = ?", (fid,)).fetchone()[0]
+    # Keep structural nodes ahead of split sentence leaves so large files keep their spine under caps.
+    rows = conn.execute(
+        f"SELECT {NODE_COLS}, n.parent_id {NODE_FROM} WHERE n.file_id = ? "
+        "ORDER BY CASE WHEN n.kind = 'file' THEN 0 "
+        "WHEN n.kind IN ('record', 'class', 'function', 'method') THEN 1 "
+        "WHEN n.kind = 'section' AND n.name NOT LIKE '% sentence %' THEN 2 "
+        "WHEN n.kind IN ('variable', 'comment', 'block', 'element') THEN 3 "
+        "WHEN n.kind = 'tag' THEN 4 ELSE 5 END, n.line_start, n.id LIMIT ?",
+        (fid, max_nodes),
+    ).fetchall()
+    nodes_by_id: dict[int, dict] = {}
+    root_id: int | None = None
+    for r in rows:
+        b = _brief(r)
+        b["parent_id"] = r["parent_id"]
+        nodes_by_id[b["id"]] = b
+        if b["kind"] == "file" and root_id is None:
+            root_id = b["id"]
+    truncated = total > len(nodes_by_id)
+    local_ids = list(nodes_by_id)
+    edges_by_id: dict[int, dict] = {}
+    if local_ids:
+        ph = ",".join("?" * len(local_ids))
+        edge_rows = conn.execute(
+            f"SELECT id, source_id, target_id, kind, meta FROM edges "
+            f"WHERE source_id IN ({ph}) OR target_id IN ({ph}) ORDER BY id",
+            local_ids + local_ids,
+        ).fetchall()
+        for e in edge_rows:
+            for endpoint in (e["source_id"], e["target_id"]):
+                if endpoint not in nodes_by_id:
+                    if len(nodes_by_id) >= max_nodes + 40:
+                        truncated = True
+                        continue
+                    ext = get_node(conn, endpoint)
+                    if ext:
+                        ext.pop("source", None)
+                        nodes_by_id[endpoint] = ext
+            if e["source_id"] in nodes_by_id and e["target_id"] in nodes_by_id:
+                edges_by_id[e["id"]] = {
+                    "id": e["id"], "from": e["source_id"], "to": e["target_id"],
+                    "kind": e["kind"], "meta": e["meta"],
+                }
+    return {
+        "file": file_row["rel_path"],
+        "root": root_id,
+        "nodes": list(nodes_by_id.values()),
+        "edges": list(edges_by_id.values()),
+        "truncated": truncated,
+    }
 

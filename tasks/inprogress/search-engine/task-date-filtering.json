@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "id": "task-date-filtering",
+  "kind": "task",
+  "number": null,
+  "title": "Date & Modification-Time Filtering (`after` / `before`)",
+  "status": "inprogress",
+  "priority": "medium",
+  "area": "search-engine",
+  "tags": [
+    "search-engine",
+    "date-filtering",
+    "sqlite"
+  ],
+  "created": "",
+  "updated": "2026-11-13",
+  "horizon": "next",
+  "effort": "",
+  "goal": "",
+  "relations": {
+    "blocks": [],
+    "blocked_by": [],
+    "depends_on": [],
+    "related": [],
+    "parent": null,
+    "children": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "invalidates": [],
+    "invalidated_by": []
+  },
+  "sections": {
+    "what": "Filter hybrid keyword and semantic search results by file modification time (Phase 1 shipped) and extracted in-document dates (Phase 2 planned).",
+    "why": "Filesystem mtime alone shifts on git clone, file copies, or migrations; callers also need document/turn date filtering (`doc_date`) across Markdown, JSON/JSONL, CSV, and git history.",
+    "how": "Phase 1 wired `parse_date_bound` and `after`/`before` filtering through `Searcher`, CLI, MCP, and HTTP APIs. Phase 2 adds optional `doc_date` extraction in `db.py` + parsers, `--date-source mtime|doc|any`, and `mtime`/`doc_date` hit metadata in `graph.get_node`.",
+    "verify": "C:\\ProgramData\\miniconda3\\python.exe -m pytest F:\\AI\\codesearch\\tests\\test_codesearch_db.py -k test_date_filtering_keyword_semantic_and_mcp -v",
+    "acceptance": [
+      {
+        "text": "Phase 1: Support after/before mtime filtering in Searcher, CLI, MCP, and HTTP /api/search",
+        "done": true
+      },
+      {
+        "text": "Phase 2: Extract normalized doc_date timestamps across Markdown frontmatter, JSON/JSONL records, and CSV date columns",
+        "done": false
+      },
+      {
+        "text": "Phase 2: Add --date-source mtime|doc|any toggle across search interfaces",
+        "done": false
+      },
+      {
+        "text": "Phase 2: Surface mtime and doc_date metadata in materialized search hits",
+        "done": false
+      }
+    ],
+    "files": [
+      "src/codesearch/search.py",
+      "src/codesearch/db.py",
+      "src/codesearch/cli.py",
+      "src/codesearch/mcp_server.py",
+      "src/codesearch/app.py",
+      "src/codesearch/serve_public_viwo.py",
+      "tests/test_codesearch_db.py"
+    ],
+    "custom": {
+      "1_current_state_honest_assessment": "Before this update, `codesearch` indexed file modification timestamps (`files.mtime` stored as `REAL` Unix epoch seconds in SQLite `src/codesearch/db.py`), and `csv_parser.py` recognized `\"dato\"` / `\"date\"` columns only as row ID candidates. None of the search interfaces exposed any date or time filter:\n- `Searcher._filters()` only filtered on `n.kind`, `f.language`, `f.rel_path`, and `PART_KINDS`.\n- No CLI, MCP, or HTTP parameter existed for filtering by date.\n\n### What Was Shipped (Phase 1: File `mtime`)\n\nPhase 1 adds `after` and `before` filtering on `files.mtime` across the entire query stack:\n- **`src/codesearch/search.py`**:\n  - Added `parse_date_bound(value, *, end_of_day=False)` supporting `YYYY-MM-DD` (expanding `before` to `23:59:59.999999` local time so whole-day inclusive filters work naturally), full ISO-8601 datetimes (including `Z` UTC suffix under Python 3.10), and Unix epoch numbers/strings.\n  - Updated `Searcher.search`, `Searcher.keyword`, `Searcher._allowed`, and `Searcher._filters` so both FTS5 keyword hits and dense vector hits respect `f.mtime >= after_ts` and `f.mtime <= before_ts`.\n- **`src/codesearch/cli.py`**: Added `--after` and `--before` options on the `search` subcommand.\n- **`src/codesearch/mcp_server.py`**: Added `after` and `before` parameters on `search_code`, returning `{\"error\": ...}` on invalid date strings.\n- **`src/codesearch/app.py` and `serve_public_viwo.py`**: Added `?after=...&before=...` query parameters on `/api/search` (HTTP 400 on malformed dates).\n- **Verified in `tests/test_codesearch_db.py::test_date_filtering_keyword_semantic_and_mcp`**: Verified keyword-only filtering, semantic-only vector `_allowed` gating, and MCP `search_code` validation.\n\n---",
+      "2_phase_2_why_mtime_alone_is_not_enough_planned": "Filesystem `mtime` is fragile: `git clone`, file copies, batch formatting, or automated migrations bump `st_mtime` without changing when an event, journal entry, or document actually occurred.\n\nPhase 2 should add semantic document/node dates without breaking existing zero-migration queries:\n1. **Optional `node_dates` or `doc_date` column (`db.py` schema v2 / migration)**:\n   - Extract normalized ISO timestamps (`YYYY-MM-DD` or epoch range) at parse time:\n     - Markdown YAML frontmatter (`date`, `filed`, `created`, `updated`).\n     - JSON / JSONL records (`timestamp`, `created_at`, `updated_at`, `filed`, `tick`).\n     - CSV date columns (`date`, `dato`, `timestamp`).\n     - Optional Git log fallback (`git log -1 --format=%ct -- <file>` for tracked files).\n2. **Scope toggle (`--date-source mtime|doc|any`)**:\n   - Let callers filter explicitly by filesystem `mtime` vs. extracted document/turn date (e.g., querying RP chat exports or patch notes written in October 2026 regardless of disk copy time).\n3. **Hit metadata visibility**:\n   - Return `mtime` and `doc_date` in materialized search results (`graph.get_node`) so agents see when a matched note/file was written or edited."
+    }
+  },
+  "links": {
+    "wiki": [],
+    "docs": [],
+    "commits": [],
+    "urls": []
+  },
+  "evidence": [
+    "pytest tests/test_codesearch_db.py -k test_date_filtering_keyword_semantic_and_mcp passed (Phase 1)"
+  ],
+  "invalidation": null,
+  "extra": {
+    "status_note": "Phase 1 Implemented (File `mtime`); Phase 2 Planned (Extracted Document Dates)",
+    "area_note": "Search Engine (`src/codesearch/search.py`, `cli.py`, `mcp_server.py`, `app.py`, `serve_public_viwo.py`)",
+    "inline_meta": {
+      "target": "Filter hybrid keyword and semantic search results by file modification time and, later, extracted in-document dates."
+    },
+    "migrated_from": "tasks/task-date-filtering.md"
+  }
+}

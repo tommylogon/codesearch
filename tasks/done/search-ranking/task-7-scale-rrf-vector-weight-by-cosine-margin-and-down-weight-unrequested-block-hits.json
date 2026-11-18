@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "id": "task-7",
+  "kind": "task",
+  "number": 7,
+  "title": "Scale RRF vector weight by cosine margin and down-weight unrequested block hits",
+  "status": "done",
+  "priority": "high",
+  "area": "search-ranking",
+  "tags": [
+    "search-ranking",
+    "rrf",
+    "vectors"
+  ],
+  "created": "2026-11-17",
+  "updated": "2026-11-17",
+  "horizon": "now",
+  "effort": "",
+  "goal": "",
+  "relations": {
+    "blocks": [],
+    "blocked_by": [],
+    "depends_on": [],
+    "related": [],
+    "parent": null,
+    "children": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "invalidates": [],
+    "invalidated_by": []
+  },
+  "sections": {
+    "what": "Weight vector RRF contributions by cosine margin (sim - MIN_SIMILARITY) / (K + rank) and down-weight kind=block hits by 0.5x unless kind=block is explicitly requested.",
+    "why": "Small-bucket rank #1 in vec:function (e.g. 0.46 cosine on a 3-line markdown code fence) currently gets the same RRF score as rank #1 in vec:comment, crowding out genuine prose sections.",
+    "how": "",
+    "verify": "Run pytest tests/test_codesearch_db.py covering cosine-margin RRF weighting and kind=block down-weighting.",
+    "acceptance": [
+      {
+        "text": "Vector RRF contributions scale with cosine margin above MIN_SIMILARITY rather than flat 1/(K+rank).",
+        "done": true
+      },
+      {
+        "text": "Markdown code-fence block nodes are down-weighted (e.g. 0.5x) unless kind=block is explicitly requested.",
+        "done": true
+      },
+      {
+        "text": "Unit tests verify strong vec:comment prose sections outrank mediocre vec:function code-fence blocks on markdown searches.",
+        "done": true
+      }
+    ],
+    "files": [
+      "src/codesearch/search.py",
+      "src/codesearch/config.py",
+      "tests/test_codesearch_db.py"
+    ],
+    "custom": {}
+  },
+  "links": {
+    "wiki": [],
+    "docs": [],
+    "commits": [],
+    "urls": []
+  },
+  "evidence": [
+    "Weighted RRF vector contributions by cosine margin above MIN_SIMILARITY in Searcher.search() (src/codesearch/search.py).",
+    "Added BLOCK_UNREQUESTED_WEIGHT (0.5x) in src/codesearch/config.py and Searcher._block_node_ids() down-weighting when kind='block' is not requested.",
+    "Verified with `pytest` (59 passed, including test_sim_not_path_cosine_margin_and_block_downweight)."
+  ],
+  "invalidation": null,
+  "extra": {},
+  "history": [
+    {
+      "from": "todo",
+      "to": "inprogress",
+      "at": "2026-11-17T21:41:27Z"
+    },
+    {
+      "from": "inprogress",
+      "to": "done",
+      "at": "2026-11-17T21:43:51Z"
+    }
+  ]
+}

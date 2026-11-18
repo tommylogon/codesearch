@@ -232,7 +232,7 @@ class _Walker:
         return f"{key} of {owner}" if owner else key
 
     def _check_cap(self) -> bool:
-        if len(self.nodes) >= config.MAX_JSON_NODES:
+        if config.MAX_JSON_NODES is not None and len(self.nodes) >= config.MAX_JSON_NODES:
             if not self.capped:
                 self.capped = True
                 self.problems.append(
@@ -290,6 +290,19 @@ class _Walker:
         if value and isinstance(value[0], dict):
             shape.append("item fields: " + ", ".join(str(k) for k in value[0]))
         ls = self._line(f'"{key}"')
+        # Fold pure scalar arrays (tags, files, wiki links, etc.) into the parent record node
+        # instead of minting a standalone `tag` node per array element.
+        is_scalar_array = bool(value) and all(not isinstance(item, (dict, list)) for item in value)
+        has_prose_item = is_scalar_array and any(
+            isinstance(item, str) and _is_prose(item) for item in value
+        )
+        if is_scalar_array and not has_prose_item:
+            folded = ", ".join(_scalar_text(item) for item in value)
+            if folded:
+                shape.append(folded)
+            self._add("record", path, key, self._signature(key, owner),
+                      "\n".join(shape), parent, ls)
+            return
         self._add("record", path, key, self._signature(key, owner),
                   "\n".join(shape), parent, ls)
         for i, item in enumerate(value, 1):

@@ -201,7 +201,7 @@ def _clip_to_box(x1: float, y1: float, x2: float, y2: float, hw: float, hh: floa
 
 def render_subgraph(conn, root_id: int, depth: int = 1, expand_ids: list[int] | None = None,
                     kinds: tuple[str, ...] | None = None, max_nodes: int = 60,
-                    out_path: Path | None = None) -> dict:
+                    out_path: Path | None = None, renders_dir: Path | None = None) -> dict:
     """Render a Set-of-Mark subgraph PNG and return both metadata and the saved file path."""
     expand_clean = [int(x) for x in (expand_ids or []) if int(x) != root_id]
     data = graph.merged_neighborhood(conn, root_id, depth=depth, expand_ids=expand_clean,
@@ -308,11 +308,11 @@ def render_subgraph(conn, root_id: int, depth: int = 1, expand_ids: list[int] | 
         draw.text((x0 + 8, y0 + 26), sub, fill="#1b1e24", font=f_small)
 
     if out_path is None:
-        renders_dir = config.DATA_DIR / "renders"
-        renders_dir.mkdir(parents=True, exist_ok=True)
+        target_renders_dir = Path(renders_dir) if renders_dir is not None else (config.DATA_DIR / "renders")
+        target_renders_dir.mkdir(parents=True, exist_ok=True)
         slug = re.sub(r"[^a-zA-Z0-9_.-]+", "_", root_name)[:48].strip("_") or str(root_id)
         exp_tag = ("_exp_" + "_".join(map(str, expand_clean[:4]))) if expand_clean else ""
-        out_path = renders_dir / f"graph_{root_id}_{slug}{exp_tag}.png"
+        out_path = target_renders_dir / f"graph_{root_id}_{slug}{exp_tag}.png"
     else:
         out_path = Path(out_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)

@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "id": "bug-1",
+  "kind": "bug",
+  "number": 1,
+  "title": "Prevent cold VectorIndex rebuild and signature scans from blocking MCP MainThread past 3m deadline",
+  "status": "done",
+  "priority": "critical",
+  "area": "search-engine",
+  "tags": [
+    "mcp-server",
+    "performance",
+    "vectors",
+    "timeouts"
+  ],
+  "created": "2026-11-14",
+  "updated": "2026-11-17",
+  "horizon": "now",
+  "effort": "m",
+  "goal": "Keep cold MCP search_code latency well below client timeout deadlines without blocking MainThread on SQL vector pack builds",
+  "relations": {
+    "blocks": [],
+    "blocked_by": [],
+    "depends_on": [],
+    "related": [
+      "bug-2"
+    ],
+    "parent": null,
+    "children": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "invalidates": [],
+    "invalidated_by": []
+  },
+  "sections": {
+    "what": "During live MCP sessions (2026-11-13 and 2026-11-14), cold search_code calls exceeded the 3m0s MCP client deadline (\"context deadline exceeded\") and blocked MainThread for 326.9s (viwo) up to 1446.9s (code, 24.1m) while VectorIndex.__init__ (src/codesearch/embedder.py:685-755) queried SQLite vec_cache/node_parts, stacked numpy arrays, and wrote .npy packs synchronously on MainThread. Even after .npy vecpacks existed on disk (mcp.log 19:53:40), cold search_code on viwo still spent 17,680.8ms loading packs because _part_signature() (embedder.py:592-622) spent 16,189.1ms running COUNT/MAX/SUM(hash) scans over 202k vec_cache + 337k node_parts rows. Additionally, strict=True still invokes self.semantic() even when kw_hits == 0 (mcp.log 11:53:07).",
+    "why": "Agents calling search_code hit hard 3-minute MCP timeouts on first use and stall the shared stdio MainThread for other tools like file_outline or codesearch_stats.",
+    "how": "1. In Searcher.search (src/codesearch/search.py:338), short-circuit self.semantic() when strict=True and len(kw_ids) == 0, and add a targeted re-rank path for small strict keyword sets when full vector matrices are not already in RAM.\n2. Replace the multi-second COUNT/MAX/SUM(hash) queries in _part_signature (src/codesearch/embedder.py:592-622) with a lightweight invalidation version/generation token updated in meta whenever node_parts or vec_cache mutates for a (part, model).\n3. Move initial SQL->.npy vecpack generation off the synchronous search_code MainThread hot path (or bound wait/fallback cleanly to keyword-only with a diagnostic note + background warm-up thread) so search_code never blocks past the 180s MCP deadline.",
+    "verify": "1. Run search_code on viwo with strict=True and a 0-hit query: confirm kw_hits=0 and 0 semantic/embedder calls occur.\n2. Clear in-process vector cache and run cold search_code on viwo with existing vecpacks: confirm sig_ms + vec_load_ms drops well below 1s instead of ~17.7s.\n3. Trigger search_code when a part lacks a .npy pack on disk: confirm MCP returns promptly within bounded latency rather than blocking for 326s-1446s past the 3m client deadline.",
+    "acceptance": [
+      {
+        "text": "Cold Searcher._part_vectors on a large DB (viwo/code) completes or fails fast well under the 180s MCP timeout without freezing MainThread for 5-24 minutes",
+        "done": true
+      },
+      {
+        "text": "_part_signature avoids full SUM(hash) SQLite scans over 200k+ rows on every cold pack load by using a fast O(1) index/embed invalidation stamp in meta",
+        "done": true
+      },
+      {
+        "text": "When strict=True returns 0 keyword hits, Searcher.search skips calling self.semantic() altogether",
+        "done": true
+      },
+      {
+        "text": "Concurrent MCP read calls (e.g. list_indexes, file_outline, get_code) are not starved on MainThread while a background vector build or load runs",
+        "done": true
+      }
+    ],
+    "files": [
+      "src/codesearch/embedder.py",
+      "src/codesearch/search.py",
+      "src/codesearch/mcp_server.py"
+    ],
+    "custom": {}
+  },
+  "links": {
+    "wiki": [],
+    "docs": [],
+    "commits": [],
+    "urls": []
+  },
+  "evidence": [
+    "Replaced full-table SUM(hash) scans in embedder._part_signature and Searcher._vec_key with O(1) meta.vec_generation + B-tree MAX(rowid) lookups.",
+    "Added allow_sql_build=False + schedule_pack_warmup background thread in embedder.py, wired via Searcher(..., background_pack_build=True) in mcp_server.py so cold MCP search_code never blocks MainThread on SQL->.npy builds.",
+    "Short-circuited Searcher.search() to skip self.semantic() when strict=True and kw_ids is empty.",
+    "Verified with `pytest -k test_cold_vector_pack_nonblocking_strict_shortcircuit_and_fast_sig` (1 passed)."
+  ],
+  "invalidation": null,
+  "extra": {}
+}

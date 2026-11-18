@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "id": "task-embedder-comparison",
+  "kind": "task",
+  "number": null,
+  "title": "Embedding Model Benchmarking & Comparison Harness",
+  "status": "todo",
+  "priority": "medium",
+  "area": "embeddings-evaluation",
+  "tags": [
+    "embeddings",
+    "benchmarking",
+    "evaluation"
+  ],
+  "created": "",
+  "updated": "2026-11-17",
+  "horizon": "later",
+  "effort": "",
+  "goal": "",
+  "relations": {
+    "blocks": [],
+    "blocked_by": [],
+    "depends_on": [],
+    "related": [
+      "task-4"
+    ],
+    "parent": null,
+    "children": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "invalidates": [],
+    "invalidated_by": []
+  },
+  "sections": {
+    "what": "Build an embedding model benchmarking and comparison harness (`codesearch bench`) leveraging `vec_cache` keyed by `(part, hash, model)` to measure quality, cosine score separation, latency, and storage across local/hosted models.",
+    "why": "Different corpora (code vs game lore vs narrative transcripts) and instruction-tuned embedders (Qwen3-Embedding, BGE) vary sharply in cosine distributions and Recall@K; `EMBED_QUERY_INSTRUCTION` is also currently unwired in `embed_query()`.",
+    "how": "Wire `EMBED_QUERY_INSTRUCTION` prefixing in `src/codesearch/embedder.py::embed_query()`, assemble golden evaluation suites across code, game data/docs, and RP/notes, and implement `codesearch bench --models ... --queries eval.json` computing Recall@1/5, MRR@10, score distributions, throughput, and DB bloat.",
+    "verify": "codesearch bench --models text-embedding-qwen3-embedding-0.6b --queries eval.json emits a JSON + Markdown report without mutating baseline vec_cache rows.",
+    "acceptance": [
+      {
+        "text": "Wire config.EMBED_QUERY_INSTRUCTION into embedder.embed_query() and support symmetric vs asymmetric evaluation",
+        "done": false
+      },
+      {
+        "text": "Create golden evaluation suites for codebase, game data/docs, and creative writing/RP transcripts",
+        "done": false
+      },
+      {
+        "text": "Implement codesearch bench outputting Recall@1, Recall@5, MRR@10, cosine distribution stats, latency, and DB footprint in JSON + Markdown",
+        "done": false
+      }
+    ],
+    "files": [
+      "src/codesearch/embedder.py",
+      "src/codesearch/config.py",
+      "src/codesearch/db.py"
+    ],
+    "custom": {
+      "1_why_existing_architecture_already_supports_this": "`src/codesearch/db.py` keys `vec_cache` by `(part, hash, model)`:\n\n```sql\nCREATE TABLE IF NOT EXISTS vec_cache (\n    part  TEXT NOT NULL,\n    hash  INTEGER NOT NULL,\n    model TEXT NOT NULL,\n    dim   INTEGER NOT NULL,\n    vec   BLOB NOT NULL,\n    PRIMARY KEY (part, hash, model)\n);\n```\n\nBecause `model` is already part of the primary key, vectors from multiple candidate embedders can coexist cleanly in the same SQLite database without invalidating or overwriting baseline `text-embedding-qwen3-embedding-0.6b` vectors.\n\n### Implementation Gap Found During Inspection\n\n`src/codesearch/config.py` defines `EMBED_QUERY_INSTRUCTION = \"\"`, and `src/codesearch/embedder.py::embed_query()` currently sends bare `f\"{query}\"` without prepending `config.EMBED_QUERY_INSTRUCTION`. Models such as Qwen3-Embedding and BGE often show significantly different cosine distributions depending on whether an instruction prefix (`Instruct: ...\\nQuery: ...`) is used on queries while omitting it on documents. The benchmark must test both symmetric (raw query) and asymmetric (instruct-prefixed query) modes and wire `EMBED_QUERY_INSTRUCTION` inside `embed_query()`.\n\n---",
+      "2_candidate_models_to_evaluate": "1. **`text-embedding-qwen3-embedding-0.6b`** (current default baseline).\n2. **Larger Qwen3 tiers (`qwen3-embedding-4b` / `8b` quantized)** for dense narrative / lore vs. precision code retrieval.\n3. **`nomic-embed-text-v1.5` / `nomic-embed-code`** (code-focused and Matryoshka dimension reduction tests).\n4. **`bge-m3`** (multilingual Norwegian/English notes, longer context windows).\n5. **Multimodal image space models** (evaluating `embeddinggemma-2` vs. SigLIP/CLIP variants against `IMAGE_MIN_SIMILARITY = 0.58`).\n\n---",
+      "3_golden_evaluation_suites": "Mixtures of code and narrative behave differently, so benchmark suites must split results by corpus type:\n1. **Codebase Suite (VirtualWorld Python + TypeScript)**:\n   - Exact symbol / identifier paraphrase queries (\"where are memory decay constants applied\").\n   - Cross-language front/back pairs (\"TS call that posts player memory reflect\").\n2. **Game Data & Docs Suite (Markdown + JSON scenarios)**:\n   - Finding room descriptions, trigger effects, and item properties without matching noisy record keys.\n3. **Creative Writing & RP Transcripts Suite (Obsidian vault + AI Studio JSON)**:\n   - Scene retrieval by mood, character subtext, or dialogue beat rather than literal keywords.\n\n---",
+      "4_metrics_output_format": "- **Ranking Quality**: Recall@1, Recall@5, MRR@10 (comparing semantic-only vs. hybrid RRF fusion).\n- **Score Distribution & Threshold Calibration**: Mean true-positive cosine vs. 95th-percentile false-positive cosine (determines whether `config.MIN_SIMILARITY = 0.45` stays optimal per model, since different models have wildly different cosine baselines).\n- **Speed & Footprint**: Texts/sec indexing throughput, single query latency (ms), DB bloat per 10k nodes (`dim * 4` bytes).\n- **Deliverable**: `codesearch bench --models modelA,modelB --queries eval.json` writing a reproducible JSON + Markdown comparison report."
+    }
+  },
+  "links": {
+    "wiki": [],
+    "docs": [],
+    "commits": [],
+    "urls": []
+  },
+  "evidence": [
+    "2026-11-13: Wired config.EMBED_QUERY_INSTRUCTION into embedder.embed_query(), fixed Searcher.vectors multi-model cache invalidation, added direct llama-server parallel embedding (--llama / embed-server), and benchmarked embeddinggemma-300m (548.1/s on 640 viwo texts; 576.2/s live on codesearch; sim_related=0.6962 vs sim_unrelated=0.2135), embeddinggemma-2 (344.3/s; sim_related=0.8511 vs sim_unrelated=0.6734), and qwen3-0.6b (105.0/s; sim_related=0.744 vs sim_unrelated=0.3213). Asymmetric bench subcommand still pending."
+  ],
+  "invalidation": null,
+  "extra": {
+    "status_note": "Planned",
+    "area_note": "Embeddings & Evaluation (`src/codesearch/embedder.py`, `src/codesearch/config.py`, `tools/`)",
+    "inline_meta": {
+      "target": "Systematically measure retrieval quality, score separation, latency, and storage tradeoffs across local and hosted embedding models."
+    },
+    "migrated_from": "tasks/task-embedder-comparison.md"
+  }
+}

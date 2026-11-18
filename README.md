@@ -1,6 +1,8 @@
 # codesearch-mcp
 
-> A lightning-fast, local-first hybrid code and documentation search engine for AI agents with AST call-graphs, SQLite FTS5, and FastMCP.
+> **Your files already know how they're structured. `codesearch` refuses to shred them, and lets any AI ask.**
+>
+> Parse every file at its natural grain (function, class, section, record, page, or image) instead of fixed-size token windows, wire intra-file and cross-file relationships into one local SQLite graph, and retrieve through exact keywords and semantic vectors fused together.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
@@ -8,23 +10,20 @@
 
 ---
 
-## Why codesearch-mcp?
+## Core Vision & Pillars
 
-Most code-search tools for AI coding assistants are either:
-1. **Naive keyword greppers** that get blinded by line-by-line matches and have no understanding of code structure or AST hierarchies.
-2. **Bloated cloud-dependent vector monsters** that require Docker containers, gigabytes of dependencies, or paid cloud databases that upload your private code.
+1. **Natural grain over fixed windows:** The retrieval unit matches what the artifact actually is (a function, method, class, Markdown heading, JSON record, PDF section/page leaf, or image), never an arbitrary sliding window that slices code or narrative mid-thought.
+2. **One graph, every medium:** Source code, documentation, configs, tabular datasets, multi-thousand-page PDFs, transcripts, and images live in the same SQLite graph with typed edges (`DEFINES`, `CALLS`, `REFERENCES`, `IMPORTS`, `INHERITS`, `ANNOTATES`, `CONNECTS_TO`, `LINKS_TO`). Design docs link straight to implementations; tables of contents link to chapters.
+3. **Separate spaces, fused ranks:** Path/filename, symbol names, code signatures/bodies, prose/comments, and visual pixels each stay in their own vector space instead of blending into one muddled embedding. Native SQLite FTS5 BM25 and per-space cosine similarities meet through Reciprocal Rank Fusion (RRF).
+4. **An index an agent can audit:** Search results return their receipts (`keyword` vs `vec:*` ranks, matching lines/pages, and 1-hop graph neighbors) so a model can inspect *why* something surfaced rather than trusting an opaque similarity score.
+5. **Honest fidelity and no silent loss:** Each file format is decoded as deeply as its structure honestly supports. Stored node text is preserved without arbitrary slicing, parser depth/size bounds surface openly, and large documents like long PDFs expose bounded page windows instead of dumping megabytes into an agent context.
+6. **Local, incremental, one file:** BLAKE2b content hashes, FTS5 tables, graph edges, and reusable vector caches live in one `.codesearch/codesearch.db` file per workspace. No Docker stack, no background daemon, no cloud upload.
+7. **Agent-readable by default:** Built first for model consumers (CLI, `stdio` FastMCP, read-only CORS HTTP API, Set-of-Mark `#id` subgraph renders), paired with a local web UI for human inspection. Works across both codebases and sprawling multi-draft prose archives where continuity spans thousands of files.
 
-`codesearch-mcp` takes a different approach:
-- **100% Local and Private:** Embedded SQLite with FTS5 BM25 ranking. Zero telemetry, zero cloud uploads.
-- **Fast Incremental Indexing:** Indexes thousands of files across Python, TypeScript, JavaScript, HTML, Markdown, and JSON in seconds, caching hashes in SQLite.
-- **True AST Code Graphs:** Resolves definitions, calls, imports, references, and class inheritance trees.
-- **Set-of-Mark Visual Graph (`render_code_graph`):** Renders visual architecture diagrams labeled with numeric badges (`#id`) so multimodal agents (Claude 3.7, GPT-4o, Gemini) can visually inspect call trees and expand subgraphs.
-- **Hybrid Lexical + Vector Retrieval:** Exact identifier matching combined with local embedding models (via LM Studio, Ollama, or any OpenAI-compatible endpoint).
-- **Multimodal Image Retrieval:** Indexes image files (.png, .jpg, .webp) with dual-space embeddings (filename text + image-server pixel embeddings).
-- **Tabular CSV & JSON Parsing:** Fast extraction of tabular rows, column schemas, and structured documents.
-- **Remote Web API for External Agents:** Expose a read-only, CORS-enabled HTTP interface so remote or web-based agents (e.g. Qwen, GLM, Claude web, or custom frontends) can explore your local codebase safely.
-- **Worldbuilding & Lore Engine:** Treats sprawling fiction repos like stateful codebases. See [CREATIVE_WRITING.md](CREATIVE_WRITING.md) for how it tracks character dossiers, scene continuity, evidence inventories, and epistemic boundaries.
-- **Batteries-Included MCP Server:** Ready to plug into Claude Desktop, Cursor, Cline, Windsurf, and Antigravity.
+### Scope & Honest Boundaries
+
+- **What it is:** A single-file local structural graph and hybrid retrieval engine (plus an optional local embedder sidecar via LM Studio, Ollama, or standalone `llama-server`).
+- **What it is not:** A full agent memory consolidation system or a distributed GraphRAG cluster. Cross-document prose links rely on explicit structure (PDF bookmarks/TOC entries, headings, anchors, and `[[wikilinks]]`) rather than free-form NLP inference over arbitrary sentences.
 
 ---
 
@@ -32,20 +31,21 @@ Most code-search tools for AI coding assistants are either:
 
 > For a deep technical breakdown of how each extension is parsed, graphed, and routed across the 4+1 vector spaces, see [INDEXING_PIPELINE.md](INDEXING_PIPELINE.md).
 
-`codesearch` indexes source code, tabular datasets, narrative prose, and visual media out of the box:
+`codesearch` extracts honest structure from source code, documents, structured data, transcripts, and images out of the box:
 
 | Category | Extensions | Indexing & Extraction Depth |
 | :--- | :--- | :--- |
-| **Code** | `.py` | AST hierarchy (classes, methods, functions, calls, imports, docstrings). |
-| | `.ts` | TypeScript AST via Acorn/Node.js bridge. |
-| | `.js`, `.mjs`, `.cjs` | JavaScript AST (ES modules, CommonJS, functions, references). |
-| | `.html` | HTML structure and embedded `<script>` AST extraction. |
-| **Prose & Transcripts** | `.md` | Markdown sections, `# headings`, wikilinks (`[[...]]`), and prose text. |
-| | `.txt` | Plain text documents and segmented notes. |
-| | `.srt`, `.vtt` | Video subtitle and dialogue transcript timelines. |
-| **Data & Tables** | `.json`, `.jsonl` | Nested key paths, schemas, and row-by-row JSONL records. |
-| | `.csv` | Tabular data rows, column headers, and structured cell values. |
-| **Images & Media** | `.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.bmp` | Multimodal dual-indexing: text embeddings for path/filename + visual pixel embeddings via CUDA sidecar. |
+| **Code** | `.py` | Native AST hierarchy (classes, methods, functions, variables, docstrings, calls, imports, `[r]`/`[w]` refs, inheritance). |
+| | `.ts` | TypeScript AST via Acorn/Node.js strip-only transform (preserves exact source line numbers). |
+| | `.js`, `.mjs`, `.cjs` | JavaScript AST (ES modules, CommonJS, arrow functions, object methods, references). |
+| | `.html` | HTML element tree plus embedded `<script>` AST extraction wired into the JS call graph. |
+| **Documents & Prose** | `.md` | Hierarchical `# Headings`, fenced code `block`s, anchors, and Obsidian-style `[[wikilinks]]` (`LINKS_TO` edges). |
+| | `.pdf` | Hierarchical outline bookmarks, TOC cross-reference `LINKS_TO` edges, typographic heading detection, per-page leaf sections, and bounded page reading (capped per call). |
+| | `.txt` | Heading/numbered-section structure when present, or bounded paragraph blocks without slicing sentences. |
+| | `.srt`, `.vtt` | Timestamped subtitle cues and dialogue segments. |
+| **Data & Tables** | `.json`, `.jsonl` | Recursive key paths (`record` shape, keyword-only `tag` scalars, prose `section` + sentence nodes) and relational `CONNECTS_TO` links. |
+| | `.csv` | Column header schema summary and row-level records. |
+| **Images & Media** | `.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.bmp` | Dual-space indexing: dimensions + path/filename text vector plus pixel embeddings via local vision sidecar. |
 
 ---
 
@@ -83,7 +83,7 @@ codesearch index --root /path/to/project
 codesearch search "authentication flow"
 
 # Filter by node type or kind
-codesearch search "connect" --kind function --part code
+codesearch search "connect" --kind function --part function
 
 # Trace call trees
 codesearch callers handle_request
@@ -124,6 +124,9 @@ Load your embedding model into LM Studio or Ollama, then run:
 # Embed up to 5,000 pending snippets via LM Studio (default: http://localhost:1234/v1/embeddings)
 codesearch embed --limit 5000
 
+# Prune orphaned vec_cache rows from inactive embedding models before embedding
+codesearch embed --prune-stale --limit 5000
+
 # Or point to Ollama with custom dimensions
 CODESEARCH_EMBED_ENDPOINT="http://localhost:11434/v1/embeddings" \
 CODESEARCH_EMBED_MODEL="text-embedding-qwen3-embedding-0.6b" \
@@ -132,20 +135,31 @@ codesearch embed --limit 5000
 
 The embedder handles exponential backoff, batch splitting, and incremental vector storage directly in `.codesearch/codesearch.db`.
 
+### Optional Stage-2 Reranking (`Qwen3-Reranker-0.6B`)
+
+For higher precision after hybrid BM25 + vector RRF fusion, enable optional stage-2 cross-encoder reranking against a local `llama-server --reranking` endpoint (falls back cleanly to RRF order when offline):
+
+```bash
+CODESEARCH_RERANK_ENABLED=1 \
+CODESEARCH_RERANK_ENDPOINT="http://127.0.0.1:1237/v1" \
+CODESEARCH_RERANK_MODEL="Qwen3-Reranker-0.6B" \
+codesearch search "causal fear resolution"
+```
+
 ---
 
 ## Connecting to AI Agents (MCP)
 
 > For full JSON request/response schemas, parameter types, and multi-workspace client configurations, see [MCP.md](MCP.md).
 
-`codesearch-mcp` exposes 7 native FastMCP tools:
-- `search_code`: Hybrid lexical BM25 + vector search with snippet previews.
+`codesearch-mcp` exposes FastMCP tools including:
+- `search_code`: Hybrid lexical BM25 + vector search with explicit `must_terms` (AND), `should_terms` (OR), `not_terms` (NOT), `after`/`before` date filters, and optional `rerank` stage-2 scoring.
 - `code_neighbors`: Trace AST caller/callee graphs and structural neighbors up to N hops.
 - `find_references`: Find all usages, imports, and calls to a given symbol name.
 - `file_outline`: Return a structured tree of classes, functions, sections, and line ranges.
 - `get_code`: Fetch exact source code for a symbol without reading the whole file.
 - `render_code_graph`: Render an annotated Set-of-Mark visual diagram of call graphs for vision models.
-- `codesearch_stats`: Report file counts, indexed nodes, edges, and vector dimensions.
+- `codesearch_stats`: Report file counts, indexed nodes, edges, active-model vector coverage, and stale model warnings.
 
 ### Claude Desktop
 
@@ -189,18 +203,24 @@ Add to your `cline_mcp_settings.json`:
 
 ### Antigravity
 
-Add to your `.gemini/antigravity.json` or workspace settings:
+Add to your MCP config (`~/.gemini/antigravity/mcp_config.json`) with `CODESEARCH_INDEXES` (or register folders via `codesearch registry scan` / `codesearch registry add`):
 
 ```json
 {
-  "mcp_servers": {
+  "mcpServers": {
     "codesearch": {
-      "command": "codesearch",
-      "args": ["mcp", "--root", "${workspaceFolder}"]
+      "command": "python",
+      "args": ["-m", "codesearch", "mcp"],
+      "env": {
+        "PYTHONIOENCODING": "utf-8",
+        "CODESEARCH_INDEXES": "app=/path/to/app;docs=/path/to/docs"
+      }
     }
   }
 }
 ```
+
+Every MCP query/graph/code call requires an explicit `index` (call `list_indexes()` first to inspect registered indexes).
 
 ---
 
@@ -236,20 +256,20 @@ The public runner provides a sandboxed, read-only interface:
 
 ```bash
 # Run open (no password):
-python serve_public_viwo.py --port 8085 --host 0.0.0.0
+python serve_public_viwo.py --port 8085 --host 0.0.0.0 --add-index my-app=/path/to/codebase --add-index lore-repo=/path/to/docs
 
 # Or protect with a password / key:
-python serve_public_viwo.py --port 8085 --host 0.0.0.0 --key mysecretpassword
+python serve_public_viwo.py --port 8085 --host 0.0.0.0 --key mysecretpassword --add-index my-app=/path/to/codebase
 ```
 
 ### Endpoints & Parameters
 
-- `GET /api/indexes`: List all available workspace indexes (e.g. `viwo`, `hogwarts`).
-- `GET /api/stats?index=hogwarts`: Node counts, file counts, and language breakdown for a specific workspace.
-- `GET /api/search?q=<query>&index=hogwarts&limit=20`: Hybrid lexical + vector search across the chosen index.
-- `GET /api/code?path=<relative_path>&index=hogwarts&start=1&end=50`: Sandboxed source line reader.
-- `GET /api/node/<id>?index=hogwarts`: AST node details and graph relations.
-- `GET /api/graph/<id>?index=hogwarts&depth=1`: Neighborhood call graph.
+- `GET /api/indexes`: List all available workspace indexes (e.g. `my-app`, `lore-repo`).
+- `GET /api/stats?index=my-app`: Node counts, file counts, and language breakdown for a specific workspace.
+- `GET /api/search?q=<query>&index=my-app&limit=20`: Hybrid lexical + vector search across the chosen index.
+- `GET /api/code?path=<relative_path>&index=my-app&start=1&end=50`: Sandboxed source line or bounded PDF page reader.
+- `GET /api/node/<id>?index=my-app`: AST node details and graph relations.
+- `GET /api/graph/<id>?index=my-app&depth=1`: Neighborhood call graph.
 
 When password protection is enabled, pass your secret via query parameter (`?key=mysecretpassword` or `?password=...`) or via standard HTTP header (`Authorization: Bearer mysecretpassword` / `X-API-Key: ...`).
 
@@ -275,14 +295,19 @@ codesearch-mcp
 ├── src/codesearch/
 │   ├── config.py         # Tunables, file paths, embedding endpoint config
 │   ├── db.py             # SQLite FTS5 schema, graph store, vector cache
-│   ├── indexer.py        # Incremental file scanner and AST dispatcher
-│   ├── search.py         # Multi-field BM25 + cosine vector fusion
-│   ├── graph.py          # AST call/callee graph construction
-│   ├── renderer.py       # Visual Set-of-Mark graph generator
-│   ├── mcp_server.py     # FastMCP protocol interface
+│   ├── diag.py           # Rotating diagnostics and live stall watchdog
+│   ├── indexer.py        # Incremental file scanner and AST/structure dispatcher
+│   ├── embedder.py       # Multi-part text + multimodal image vector builder & packs
+│   ├── embed_server.py   # Managed local llama-server embedding runner
+│   ├── search.py         # Multi-field BM25 + cosine vector fusion (RRF)
+│   ├── graph.py          # Relational callers/callees, outlines, and overview queries
+│   ├── registry.py       # Persistent and env-based multi-index registry
+│   ├── renderer.py       # Visual Set-of-Mark (#id) graph renderer
+│   ├── mcp_server.py     # Multi-index FastMCP protocol interface
 │   ├── app.py            # Local Flask web explorer
 │   ├── cli.py            # Command line entry point
-│   └── parsers/          # Language extractors (py, ts, js, html, md, json)
+│   └── parsers/          # Extractors (py, ts/js, html, md, doc_structure, pdf, json, csv)
+└── serve_public_viwo.py  # Sandboxed multi-index read-only CORS HTTP API server
 ```
 
 ---

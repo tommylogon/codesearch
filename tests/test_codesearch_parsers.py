@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
 from codesearch import embedder                                   # noqa: E402
 from codesearch.parsers import html_parser, js_bridge, md_parser, py_parser   # noqa: E402
-from codesearch.parsers import csv_parser, json_parser                       # noqa: E402
+from codesearch.parsers import csv_parser, doc_structure, json_parser, pdf_parser   # noqa: E402
 
 PY = '''"""Module doc."""
 import os
@@ -164,7 +164,8 @@ def test_json_one_row_per_key_path():
     assert ("tag", "world::areas::apartment 1a::environment::scent") in k
     assert ("tag", "world::areas::apartment 1a::environment::light") in k
     assert ("record", "world::areas::apartment 1a::exits::east") in k
-    assert ("tag", "world::tags::1") in k
+    assert ("record", "world::tags") in k
+    assert ("tag", "world::tags::1") not in k
     assert ("tag", "world::empty") in k
     assert ("tag", "world::nothing") in k
 
@@ -403,5 +404,264 @@ Dysregulation,Stimulation Menu,"Eat food and rest.",Medium
     assert "Snap rubber band" in exec_node["docstring"]
     assert exec_node["line_start"] == 2
     assert exec_node["line_end"] == 4
+
+
+def _parts_for_parsed(parsed: dict, rel_path: str) -> dict[str, dict[str, str]]:
+    """Mirror indexer._insert_file -> embedder.part_texts mapping for each extracted node."""
+    out: dict[str, dict[str, str]] = {}
+    file_row = {
+        "kind": "file", "name": rel_path.rsplit("/", 1)[-1], "qualified_name": rel_path,
+        "signature": "json", "docstring": parsed.get("file_doc", ""), "source": "", "rel_path": rel_path,
+    }
+    out[rel_path] = embedder.part_texts(file_row)
+    for n in parsed["nodes"]:
+        row = {
+            "kind": n["kind"],
+            "name": n["name"],
+            "qualified_name": f"{rel_path}::{n['qname']}",
+            "signature": n["signature"],
+            "docstring": n["docstring"],
+            "source": n.get("source", ""),
+            "rel_path": rel_path,
+        }
+        out[n["qname"]] = embedder.part_texts(row)
+    return out
+
+
+def test_json_format_indexing_and_embedding_matrix():
+    """Verify node kinds, edges, and vector-part routing across diverse JSON/JSONL structures."""
+    # 1. Config manifest (package.json style): short scalars -> keyword-only record/tag, only file embeds
+    pkg_src = json.dumps({
+        "name": "codesearch-mcp",
+        "version": "0.1.0",
+        "scripts": {"test": "pytest -q", "lint": "ruff check"},
+        "dependencies": ["fastmcp", "numpy"],
+    }, indent=2)
+    pkg_parsed = json_parser.parse(pkg_src, "package.json")
+    pkg_parts = _parts_for_parsed(pkg_parsed, "package.json")
+    assert all(n["kind"] in ("record", "tag") for n in pkg_parsed["nodes"])
+    assert "filename" in pkg_parts["package.json"]
+    assert all(pkg_parts[n["qname"]] == {} for n in pkg_parsed["nodes"])
+
+    # 2. Entity / Character library JSON: short traits stay keyword tags; long descriptions become embedded sections + sentence splits
+    char_src = json.dumps({
+        "id": "npc_kayla",
+        "name": "Kayla",
+        "tags": ["observant", "cautious"],
+        "personality": (
+            "She watches everyone's hands before she trusts their smile. "
+            "Even old friends catch her checking the lock twice after dark."
+        ),
+        "owner_id": "guild_archive",
+    }, indent=2)
+    char_parsed = json_parser.parse(char_src, "data/kayla.json")
+    char_parts = _parts_for_parsed(char_parsed, "data/kayla.json")
+    by_q = {n["qname"]: n for n in char_parsed["nodes"]}
+    assert by_q["kayla::tags"]["kind"] == "record"
+    assert "observant, cautious" in by_q["kayla::tags"]["docstring"]
+    assert "kayla::tags::1" not in by_q
+    assert char_parts["kayla::tags"] == {}
+    assert by_q["kayla::personality"]["kind"] == "section"
+    assert set(char_parts["kayla::personality"].keys()) == {"function_name", "comment"}
+    assert by_q["kayla::personality::s1"]["kind"] == "section"
+    assert by_q["kayla::personality::s2"]["kind"] == "section"
+    assert any(r["kind"] == "CONNECTS_TO" and r["qualifier"] == "owner_id" and r["target"] == "guild_archive"
+               for r in char_parsed["refs"])
+
+    # 3. AI Studio chunkedPrompt transcript: skips isThought, embeds dialogue turns
+    aistudio_src = json.dumps({
+        "systemInstruction": {"text": "Maintain strict continuity across chapters."},
+        "chunkedPrompt": {
+            "chunks": [
+                {"role": "user", "text": "Summarize the vault scene."},
+                {"role": "model", "isThought": True, "text": "Hidden chain of thought"},
+                {"role": "model", "text": "The bronze door unlatched with a cold hiss."},
+            ]
+        },
+    }, indent=2)
+    ai_parsed = json_parser.parse(aistudio_src, "chats/session.json")
+    ai_parts = _parts_for_parsed(ai_parsed, "chats/session.json")
+    assert [n["qname"] for n in ai_parsed["nodes"]] == ["systemInstruction", "turn_001_user", "turn_002_model"]
+    assert all(n["kind"] == "section" for n in ai_parsed["nodes"])
+    assert set(ai_parts["turn_002_model"].keys()) == {"function_name", "comment"}
+
+    # 4. Antigravity JSONL transcript: extracts USER_INPUT/PLANNER_RESPONSE + CALLS edges
+    agy_jsonl = "\n".join([
+        json.dumps({"step_index": 1, "type": "USER_INPUT", "content": "Check date filtering."}),
+        json.dumps({
+            "step_index": 2, "type": "PLANNER_RESPONSE",
+            "content": "Inspecting search filters and adding mtime support.",
+            "tool_calls": [{"name": "search_code"}],
+        }),
+    ])
+    agy_parsed = json_parser.parse(agy_jsonl, "logs/transcript.jsonl")
+    assert [n["qname"] for n in agy_parsed["nodes"]] == ["turn_0001_user", "turn_0002_agent"]
+    assert any(r["kind"] == "CALLS" and r["target"] == "search_code" for r in agy_parsed["refs"])
+
+    # 5. Generic / OpenAI JSONL (known current limitation: produces 0 nodes without Antigravity `type`)
+    generic_jsonl = "\n".join([
+        json.dumps({"messages": [{"role": "user", "content": "Hello"}, {"role": "assistant", "content": "Hi there"}]}),
+        json.dumps({"timestamp": "2026-11-12T10:00:00Z", "level": "INFO", "message": "Server booted on port 8085."}),
+    ])
+    generic_parsed = json_parser.parse(generic_jsonl, "logs/openai_or_app.jsonl")
+    assert generic_parsed["nodes"] == []
+
+
+def _write_test_pdf(path: Path, pages_lines: list[list[tuple[str, float, bool]]],
+                    outlines: list[tuple[str, int, list[tuple[str, int]]]] | None = None) -> None:
+    """Build a tiny valid multi-page PDF with real Type1 fonts and optional outline tree."""
+    import pypdf
+    from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
+
+    def esc(s: str) -> str:
+        return s.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+    writer = pypdf.PdfWriter()
+    font_dict = DictionaryObject({
+        NameObject("/F1"): DictionaryObject({
+            NameObject("/Type"): NameObject("/Font"),
+            NameObject("/Subtype"): NameObject("/Type1"),
+            NameObject("/BaseFont"): NameObject("/Helvetica"),
+        }),
+        NameObject("/F2"): DictionaryObject({
+            NameObject("/Type"): NameObject("/Font"),
+            NameObject("/Subtype"): NameObject("/Type1"),
+            NameObject("/BaseFont"): NameObject("/Helvetica-Bold"),
+        }),
+    })
+    res_dict = DictionaryObject({NameObject("/Font"): font_dict})
+
+    for lines in pages_lines:
+        page = writer.add_blank_page(width=612, height=792)
+        ops = ["BT"]
+        y = 740
+        for text, size, bold in lines:
+            fname = "/F2" if bold else "/F1"
+            ops.append(f"{fname} {size:g} Tf 1 0 0 1 72 {y} Tm ({esc(text)}) Tj")
+            y -= max(14, int(size * 1.4))
+        ops.append("ET")
+        stream = DecodedStreamObject()
+        stream.set_data("\n".join(ops).encode("latin-1"))
+        stream_ref = writer._add_object(stream)
+        page[NameObject("/Resources")] = res_dict
+        page[NameObject("/Contents")] = stream_ref
+
+    for title, page_idx, children in (outlines or []):
+        parent = writer.add_outline_item(title, page_idx)
+        for c_title, c_idx in children:
+            writer.add_outline_item(c_title, c_idx, parent=parent)
+
+    with open(path, "wb") as fh:
+        writer.write(fh)
+
+
+def test_parse_structured_text_hierarchy():
+    src = (
+        "PART I: Foundations\n\n"
+        "Chapter 1: Lore Basics\n"
+        "Long before the Citadel fell, see Chapter 2 for the battle.\n\n"
+        "1.1 Geography\n"
+        "The northern ridge overlooks the harbour.\n\n"
+        "Chapter 2: The Siege\n"
+        "Ballistas lined the outer wall at dawn.\n"
+    )
+    res = md_parser.parse_text(src)
+    by_q = {n["qname"]: n for n in res["nodes"]}
+    assert "PART I: Foundations" in by_q
+    part_q = "PART I: Foundations"
+    chap1_q = f"{part_q}::Chapter 1: Lore Basics"
+    sec11_q = f"{chap1_q}::1.1 Geography"
+    chap2_q = f"{part_q}::Chapter 2: The Siege"
+    assert by_q[chap1_q]["parent"] == part_q
+    assert by_q[sec11_q]["parent"] == chap1_q
+    assert by_q[chap2_q]["parent"] == part_q
+    assert any(r["kind"] == "LINKS_TO" and r["qualifier"] == "section" and r["target"] == "Chapter 2"
+               for r in res["refs"])
+
+
+def test_pdf_hierarchical_outline_toc_and_read_pages(tmp_path):
+    pdf_path = tmp_path / "manual.pdf"
+    long_para = " ".join(["arcana"] * 80)
+    pages = [
+        [
+            ("Table of Contents", 14, True),
+            ("Chapter 1: Foundations ............. 2", 10, False),
+            ("Chapter 2: Combat .................. 4", 10, False),
+        ],
+        [
+            ("Chapter 1: Foundations", 14, True),
+            ("Magic flows from ancient stone obelisks.", 10, False),
+            ("See Chapter 2 for tactical combat details.", 10, False),
+        ],
+        [
+            ("1.1 Mana Conduits", 12, True),
+            (long_para, 10, False),
+        ],
+        [
+            ("Chapter 2: Combat", 14, True),
+            ("Initiative determines turn order across rounds.", 10, False),
+        ],
+        [],
+    ]
+    outlines = [
+        ("Part I: Core Rules", 1, [
+            ("Chapter 1: Foundations", 1),
+            ("Chapter 2: Combat", 3),
+        ]),
+    ]
+    _write_test_pdf(pdf_path, pages, outlines=outlines)
+
+    res = pdf_parser.parse(pdf_path, chunk_chars=300)
+    assert res["page_count"] == 5
+    by_q = {n["qname"]: n for n in res["nodes"]}
+    assert "Part I: Core Rules" in by_q
+    chap1_q = "Part I: Core Rules::Chapter 1: Foundations"
+    assert chap1_q in by_q
+    assert by_q[chap1_q]["parent"] == "Part I: Core Rules"
+    assert by_q[chap1_q]["line_start"] == 2
+    assert by_q[chap1_q]["line_end"] == 3
+    sub_q = f"{chap1_q}::1.1 Mana Conduits"
+    assert sub_q in by_q
+    assert by_q[sub_q]["parent"] == chap1_q
+    # Dense page inside 1.1 Mana Conduits was chunked under chunk_chars=300, never dumped monolithically
+    sub_chunks = [n for n in res["nodes"] if n["parent"] == sub_q]
+    assert len(sub_chunks) >= 2
+    assert all(len(n["docstring"]) <= 350 for n in res["nodes"] if n["docstring"])
+    # Cross-references emitted for both dotted TOC and prose "See Chapter 2"
+    sec_targets = {r["target"] for r in res["refs"] if r["kind"] == "LINKS_TO" and r["qualifier"] == "section"}
+    assert "Chapter 1: Foundations" in sec_targets
+    assert "Chapter 2" in sec_targets or "Chapter 2: Combat" in sec_targets
+
+    paged = pdf_parser.read_pages(pdf_path, 1, 10, max_pages=3)
+    assert paged["total_pages"] == 5
+    assert (paged["start"], paged["end"], paged["clamped"]) == (1, 3, True)
+    assert any("=== Page 1 of 5 ===" in ln for ln in paged["lines"])
+
+
+def test_pdf_typography_headings_without_outline(tmp_path):
+    pdf_path = tmp_path / "styled.pdf"
+    pages = [
+        [
+            ("Academy Handbook", 20, True),
+            ("Welcome to the northern academy grounds.", 10, False),
+            ("House Dormitories", 14, True),
+            ("Students lodge in the eastern tower.", 10, False),
+        ],
+        [
+            ("Daily Schedule", 14, True),
+            ("Curfew Bell", 14, True),
+            ("All lanterns extinguish at ten.", 10, False),
+        ],
+    ]
+    _write_test_pdf(pdf_path, pages, outlines=None)
+
+    res = pdf_parser.parse(pdf_path)
+    names = {n["name"]: n for n in res["nodes"]}
+    assert "Academy Handbook" in names
+    assert names["House Dormitories"]["parent"] == "Academy Handbook"
+    assert names["Daily Schedule"]["parent"] == "Academy Handbook"
+    assert names["Curfew Bell"]["parent"] == "Academy Handbook"
+
+
 
 

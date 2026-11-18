@@ -20,9 +20,12 @@ Endpoints:
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sqlite3
 import sys
+import threading
+import time
 from pathlib import Path
 
 # Ensure codesearch package on sys.path
@@ -31,12 +34,46 @@ SRC_DIR = SCRIPT_DIR / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from flask import Flask, abort, jsonify, make_response, request
+from flask import Flask, abort, g, jsonify, make_response, request
 
-from codesearch import config, db, graph
+from codesearch import config, db, diag, graph
+from codesearch.parsers import pdf_parser
 from codesearch.search import Searcher
 
 app = Flask("codesearch_public", static_folder=None)
+_log = diag.get_logger("public_api")
+
+
+def _ensure_public_log() -> logging.Logger:
+    return diag.configure("public_api", log_dir=SCRIPT_DIR / ".codesearch")
+
+
+@app.before_request
+def _pub_req_start() -> None:
+    if request.path.startswith("/api/"):
+        _ensure_public_log()
+        g._req_t0 = time.perf_counter()
+
+
+@app.after_request
+def _pub_req_end(resp):
+    t0 = getattr(g, "_req_t0", None)
+    if t0 is not None:
+        dt_ms = (time.perf_counter() - t0) * 1000.0
+        level = logging.WARNING if (dt_ms >= config.SLOW_QUERY_MS or resp.status_code >= 500) else logging.DEBUG
+        _log.log(
+            level,
+            "PUB_HTTP %s %s index=%s status=%d ms=%.1f ip=%s qs=%s",
+            request.method,
+            request.path,
+            request.args.get("index", ""),
+            resp.status_code,
+            dt_ms,
+            request.remote_addr or "",
+            request.query_string.decode("utf-8", "replace")[:200],
+        )
+        diag.flush()
+    return resp
 
 # Registry of accessible workspaces
 INDEX_REGISTRY: dict[str, dict] = {
@@ -54,7 +91,9 @@ INDEX_REGISTRY: dict[str, dict] = {
 
 DEFAULT_INDEX = "viwo"
 API_KEY: str | None = None
-_searchers: dict[str, Searcher] = {}
+_vector_caches: dict[str, dict] = {}
+_vector_locks: dict[str, threading.RLock] = {}
+_caches_lock = threading.Lock()
 
 
 def _resolve_index_key(name: str | None) -> str:
@@ -80,14 +119,10 @@ def _conn_for_index(index_key: str) -> sqlite3.Connection:
 
 def _searcher_for_index(index_key: str, conn: sqlite3.Connection) -> Searcher:
     root, _ = _get_index_paths(index_key)
-    # Configure codesearch globals for this search
-    config.set_root(root)
-    s = _searchers.get(index_key)
-    if s is None:
-        s = Searcher(conn)
-        _searchers[index_key] = s
-    s.conn = conn
-    return s
+    with _caches_lock:
+        cache = _vector_caches.setdefault(index_key, {})
+        lock = _vector_locks.setdefault(index_key, threading.RLock())
+    return Searcher(conn, repo_root=root, vector_cache=cache, vector_lock=lock)
 
 
 def _safe_path_for_index(index_key: str, rel: str) -> Path:
@@ -191,8 +226,6 @@ def api_indexes():
 @app.get("/api/stats")
 def api_stats():
     index_key = _resolve_index_key(request.args.get("index"))
-    root, _ = _get_index_paths(index_key)
-    config.set_root(root)
     conn = _conn_for_index(index_key)
     try:
         data = db.stats(conn)
@@ -237,22 +270,30 @@ def api_search():
                 prefix = None
 
         part = a.get("part") or None
+        after = a.get("after") or None
+        before = a.get("before") or None
         match_all = a.get("any") not in ("1", "true")
         strict = a.get("strict") in ("1", "true")
         semantic = a.get("semantic", "1") != "0"
 
-        hits = s.search(
-            query_text,
-            limit=limit,
-            offset=offset,
-            kinds=kinds,
-            languages=langs,
-            path_prefix=prefix,
-            part=part,
-            match_all=match_all,
-            strict=strict,
-            semantic=semantic,
-        )
+        try:
+            with diag.watch_slow(f"public_search:{index_key}:{query_text[:32]}", logger=_log):
+                hits = s.search(
+                    query_text,
+                    limit=limit,
+                    offset=offset,
+                    kinds=kinds,
+                    languages=langs,
+                    path_prefix=prefix,
+                    part=part,
+                    match_all=match_all,
+                    strict=strict,
+                    semantic=semantic,
+                    after=after,
+                    before=before,
+                )
+        except ValueError as exc:
+            abort(400, f"Invalid date filter: {exc}")
         return jsonify({
             "results": hits,
             "count": len(hits),
@@ -310,6 +351,34 @@ def api_code():
     target = _safe_path_for_index(index_key, path)
     if target.suffix.lower() in config.IMAGE_LANGUAGES:
         return jsonify({"path": path, "index": index_key, "image": True, "error": "Binary image file"})
+    if target.suffix.lower() == ".pdf":
+        res = pdf_parser.read_pages(target, start, end, max_pages=20)
+        if "error" in res:
+            return jsonify({
+                "path": path,
+                "index": index_key,
+                "pdf": True,
+                "unit": "pages",
+                "error": res["error"],
+                "lines": [],
+            }), 422
+        payload = {
+            "path": path,
+            "index": index_key,
+            "pdf": True,
+            "unit": "pages",
+            "page_start": res["start"],
+            "page_end": res["end"],
+            "total_pages": res["total_pages"],
+            "clamped": res["clamped"],
+            "lines": res["lines"],
+        }
+        if res["clamped"]:
+            payload["note"] = (
+                f"clamped to {res['end'] - res['start'] + 1} pages per call; "
+                f"request again from page {res['end'] + 1}"
+            )
+        return jsonify(payload)
 
     lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
     lo = max(1, start - ctx)
@@ -349,15 +418,20 @@ def main():
                     "description": f"Custom index for {p.strip()}",
                 }
 
+    log = _ensure_public_log()
     print("============================================================")
     print(" codesearch Multi-Index Public API")
     print(f" Listening on:       http://{args.host}:{args.port}")
+    print(f" Log file:           {diag.current_log_path()}")
     print(f" Password / Auth:    {'ENABLED' if API_KEY else 'DISABLED (Open)'}")
     print(f" Registered Indexes: {list(INDEX_REGISTRY.keys())}")
     for k, v in INDEX_REGISTRY.items():
-        exists = (v['path'] / '.codesearch' / 'codesearch.db').exists()
-        status = 'READY' if exists else 'NOT INDEXED'
+        db_p = v["path"] / ".codesearch" / "codesearch.db"
+        exists = db_p.exists()
+        status = "READY" if exists else "NOT INDEXED"
         print(f"   [{k:8}] -> {v['path']} ({status})")
+        log.info("PUB_INDEX_REG key=%s path=%s db_exists=%s", k, v["path"], exists)
+    diag.flush()
     print("============================================================")
 
     app.run(host=args.host, port=args.port, debug=False, threaded=True)

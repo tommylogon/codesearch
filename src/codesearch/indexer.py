@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import os
 import posixpath
+import re
 import sqlite3
 import time
 from collections import defaultdict
@@ -17,7 +18,7 @@ from fnmatch import fnmatch
 from pathlib import Path
 
 from . import config, db, embedder
-from .parsers import csv_parser, html_parser, js_bridge, json_parser, md_parser, py_parser
+from .parsers import csv_parser, html_parser, js_bridge, json_parser, md_parser, pdf_parser, py_parser
 
 RESOLVED_KINDS = ("CALLS", "REFERENCES", "IMPORTS", "INHERITS", "LINKS_TO", "CONNECTS_TO")
 JS_BATCH = 150
@@ -71,7 +72,7 @@ def scan(root: Path) -> tuple[list[dict], dict]:
             max_bytes = (config.MAX_JSON_BYTES if lang == "json"
                          else config.IMAGE_MAX_BYTES if lang == "image"
                          else config.MAX_FILE_BYTES)
-            if st.st_size > max_bytes:
+            if max_bytes is not None and st.st_size > max_bytes:
                 skipped["too_large"] += 1
                 continue
             if (config.SKIP_JS_WITH_TS_SIBLING and ext == ".js"
@@ -84,10 +85,10 @@ def scan(root: Path) -> tuple[list[dict], dict]:
 
 
 def _read(path: Path) -> str | None:
-    data = path.read_bytes()
-    if b"\x00" in data[:4096]:
-        return None
-    return data.decode("utf-8", errors="replace")
+    with path.open("rb") as fh:
+        if b"\x00" in fh.read(4096):
+            return None
+    return path.read_text(encoding="utf-8", errors="replace")
 
 
 def _hash(text: str) -> str:
@@ -137,6 +138,10 @@ def _parse_files(changed: list[dict], progress=lambda msg: None) -> tuple[dict[s
             html_scripts[rel] = res.get("scripts", [])
         elif lang in ("typescript", "javascript"):
             js_jobs.append({"id": rel, "text": text, "ts": lang == "typescript", "offset": 0})
+        elif lang == "pdf":
+            res = pdf_parser.parse(f["path"], rel, progress=progress)
+            f["lines"] = res.get("page_count", 0)
+            parsed[rel] = res
         elif lang == "image":
             parsed[rel] = {"file_doc": "", "nodes": [], "refs": []}
         if i % 500 == 0:
@@ -191,65 +196,104 @@ def _annotation_target(c: dict, others: list[dict]) -> int | None:
     return best
 
 
-def _insert_file(conn: sqlite3.Connection, f: dict, parsed: dict) -> int:
+_INSERT_CHUNK = 50_000
+
+
+def _insert_file(conn: sqlite3.Connection, f: dict, parsed: dict, progress=lambda msg: None) -> int:
     rel = f["rel"]
     is_image = f["language"] == "image"
-    lines = 0 if is_image else f["text"].count("\n") + 1
+    is_pdf = f["language"] == "pdf"
+    lines = 0 if is_image else int(f.get("lines", 0)) if is_pdf else f["text"].count("\n") + 1
     cur = conn.execute("INSERT INTO files(rel_path, language, hash, mtime, lines) VALUES (?,?,?,?,?)",
                        (rel, f["language"], f["hash"], f["mtime"], lines))
     file_id = cur.lastrowid
 
-    def add(kind, name, qname, signature, doc, source, ls, le):
-        full_qname = f"{rel}::{qname}" if qname else rel
-        c = conn.execute(
-            "INSERT INTO nodes(file_id, kind, name, qualified_name, signature, docstring, source,"
-            " line_start, line_end) VALUES (?,?,?,?,?,?,?,?,?)",
-            (file_id, kind, name, full_qname, signature, doc, source, ls, le))
-        nid = c.lastrowid
-        fts.append(db.fts_row(nid, name, qname, signature, doc, rel, source))
-        row_obj = {"kind": kind, "name": name, "qualified_name": full_qname,
-                   "signature": signature, "docstring": doc, "source": source, "rel_path": rel}
-        for part, text in embedder.part_texts(row_obj).items():
-            part_rows.append((nid, part, embedder.text_hash(text)))
-        return nid
+    next_id = (conn.execute("SELECT COALESCE(MAX(id), 0) FROM nodes").fetchone()[0] or 0) + 1
+    file_node = next_id
+    next_id += 1
 
-    fts: list[tuple] = []
-    part_rows: list[tuple] = []
     doc = parsed.get("file_doc", "") or (_image_dims(f["path"]) if is_image else "")
-    file_node = add("file", posixpath.basename(rel), "", f["language"], doc,
-                    "", 1, max(lines, 1))
+    conn.execute(
+        "INSERT INTO nodes(id, file_id, kind, name, qualified_name, parent_id, signature, docstring, source,"
+        " line_start, line_end) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (file_node, file_id, "file", posixpath.basename(rel), rel, None, f["language"], doc, "", 1, max(lines, 1)),
+    )
+    file_row_obj = {"kind": "file", "name": posixpath.basename(rel), "qualified_name": rel,
+                    "signature": f["language"], "docstring": doc, "source": "", "rel_path": rel}
+    file_parts = [(file_node, part, embedder.text_hash(text))
+                  for part, text in embedder.part_texts(file_row_obj).items()]
+    if file_parts:
+        conn.executemany("INSERT OR REPLACE INTO node_parts(node_id, part, hash) VALUES (?,?,?)", file_parts)
+    db.insert_fts(conn, [db.fts_row(file_node, posixpath.basename(rel), "", f["language"], doc, rel, "")])
 
+    nodes_raw = parsed["nodes"]
+    qnames: list[str] = []
+    node_ids: list[int] = []
     ids: dict[str, int] = {}
-    seen: set[str] = set()
-    nodes = []
-    for n in parsed["nodes"]:
-        n = dict(n)
-        if n["qname"] in seen:
-            n["qname"] = f"{n['qname']}@{n['line_start']}"
-        seen.add(n["qname"])
-        nodes.append(n)
-    for n in nodes:
-        ids[n["qname"]] = add(n["kind"], n["name"], n["qname"], n["signature"], n["docstring"],
-                              n["source"], n["line_start"], n["line_end"])
-    edges: list[tuple] = []
-    parent_updates: list[tuple] = []
-    for n in nodes:
-        nid = ids[n["qname"]]
-        parent = ids.get(n["parent"]) if n["parent"] else None
-        if parent is not None:
-            parent_updates.append((parent, nid))
-        if n["kind"] != "comment":
-            edges.append((parent if parent is not None else file_node, nid, "DEFINES", ""))
-    conn.executemany("UPDATE nodes SET parent_id = ? WHERE id = ?", parent_updates)
+    has_comments = False
+    for n in nodes_raw:
+        qn = n["qname"]
+        if qn in ids:
+            qn = f"{qn}@{n['line_start']}"
+        nid = next_id
+        next_id += 1
+        ids[qn] = nid
+        qnames.append(qn)
+        node_ids.append(nid)
+        if n["kind"] == "comment":
+            has_comments = True
 
-    others = [n for n in nodes if n["kind"] != "comment"]
-    for n in nodes:
-        if n["kind"] != "comment":
-            continue
-        idx = _annotation_target(n, others)
-        target = ids[others[idx]["qname"]] if idx is not None else file_node
-        edges.append((ids[n["qname"]], target, "ANNOTATES", ""))
-    conn.executemany("INSERT OR IGNORE INTO edges(source_id, target_id, kind, meta) VALUES (?,?,?,?)", edges)
+    total = len(nodes_raw)
+    node_sql = (
+        "INSERT INTO nodes(id, file_id, kind, name, qualified_name, parent_id, signature, docstring, source,"
+        " line_start, line_end) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
+    )
+    edge_sql = "INSERT OR IGNORE INTO edges(source_id, target_id, kind, meta) VALUES (?,?,?,?)"
+    part_sql = "INSERT OR REPLACE INTO node_parts(node_id, part, hash) VALUES (?,?,?)"
+
+    for start in range(0, total, _INSERT_CHUNK):
+        end = min(start + _INSERT_CHUNK, total)
+        node_rows: list[tuple] = []
+        edge_rows: list[tuple] = []
+        part_rows: list[tuple] = []
+        fts_rows: list[tuple] = []
+        for idx in range(start, end):
+            n = nodes_raw[idx]
+            nid = node_ids[idx]
+            qn = qnames[idx]
+            full_qname = f"{rel}::{qn}" if qn else rel
+            parent = ids.get(n["parent"]) if n["parent"] else None
+            node_rows.append((nid, file_id, n["kind"], n["name"], full_qname, parent,
+                              n["signature"], n["docstring"], n["source"], n["line_start"], n["line_end"]))
+            fts_rows.append(db.fts_row(nid, n["name"], qn, n["signature"], n["docstring"], rel, n["source"]))
+            row_obj = {"kind": n["kind"], "name": n["name"], "qualified_name": full_qname,
+                       "signature": n["signature"], "docstring": n["docstring"],
+                       "source": n["source"], "rel_path": rel}
+            for part, text in embedder.part_texts(row_obj).items():
+                part_rows.append((nid, part, embedder.text_hash(text)))
+            if n["kind"] != "comment":
+                edge_rows.append((parent if parent is not None else file_node, nid, "DEFINES", ""))
+        conn.executemany(node_sql, node_rows)
+        if edge_rows:
+            conn.executemany(edge_sql, edge_rows)
+        if part_rows:
+            conn.executemany(part_sql, part_rows)
+        db.insert_fts(conn, fts_rows)
+        if total >= 100_000:
+            progress(f"  storing {rel}: {end}/{total} nodes")
+
+    if has_comments:
+        others = [(nodes_raw[i], node_ids[i]) for i in range(total) if nodes_raw[i]["kind"] != "comment"]
+        other_dicts = [o[0] for o in others]
+        ann_edges: list[tuple] = []
+        for i, n in enumerate(nodes_raw):
+            if n["kind"] != "comment":
+                continue
+            idx = _annotation_target(n, other_dicts)
+            target = others[idx][1] if idx is not None else file_node
+            ann_edges.append((node_ids[i], target, "ANNOTATES", ""))
+        if ann_edges:
+            conn.executemany(edge_sql, ann_edges)
 
     ref_rows = []
     for r in parsed["refs"]:
@@ -257,9 +301,8 @@ def _insert_file(conn: sqlite3.Connection, f: dict, parsed: dict) -> int:
         if src is None:
             continue
         ref_rows.append((src, r["kind"], r["target"], r.get("qualifier", ""), r.get("meta", "")))
-    conn.executemany("INSERT INTO refs(source_id, kind, target, qualifier, meta) VALUES (?,?,?,?,?)", ref_rows)
-    conn.executemany("INSERT OR REPLACE INTO node_parts(node_id, part, hash) VALUES (?,?,?)", part_rows)
-    db.insert_fts(conn, fts)
+    if ref_rows:
+        conn.executemany("INSERT INTO refs(source_id, kind, target, qualifier, meta) VALUES (?,?,?,?,?)", ref_rows)
     return file_id
 
 
@@ -268,6 +311,10 @@ def resolve(conn: sqlite3.Connection) -> dict:
     """Rebuild every resolved edge from the refs table."""
     conn.execute("DELETE FROM edges WHERE kind IN (%s)" % ",".join("?" * len(RESOLVED_KINDS)),
                  RESOLVED_KINDS)
+    refs = conn.execute("SELECT source_id, kind, target, qualifier, meta FROM refs ORDER BY id").fetchall()
+    if not refs:
+        return {}
+
     rel_by_file: dict[int, str] = {}
     fam_by_file: dict[int, str] = {}
     for r in conn.execute("SELECT id, rel_path, language FROM files"):
@@ -275,36 +322,80 @@ def resolve(conn: sqlite3.Connection) -> dict:
         fam_by_file[r["id"]] = _lang_family(r["language"])
     file_by_rel = {v: k for k, v in rel_by_file.items()}
     file_node = {r["file_id"]: r["id"] for r in conn.execute("SELECT id, file_id FROM nodes WHERE kind='file'")}
+
+    def _by_ids(cols: str, where_col: str, id_list: list[int], extra: str = ""):
+        rows = []
+        for off in range(0, len(id_list), 800):
+            chunk = id_list[off:off + 800]
+            ph = ",".join("?" * len(chunk))
+            rows.extend(conn.execute(f"SELECT {cols} FROM nodes WHERE {where_col} IN ({ph}) {extra}", chunk))
+        return rows
+
     node_file: dict[int, int] = {}
     node_parent: dict[int, int | None] = {}
     node_name: dict[int, str] = {}
-    by_name: dict[str, list[tuple]] = defaultdict(list)
-    by_qname: dict[str, int] = {}
-    for r in conn.execute("SELECT id, file_id, kind, name, qualified_name, parent_id FROM nodes"):
+    source_ids = sorted({r["source_id"] for r in refs})
+    for r in _by_ids("id, file_id, name, parent_id", "id", source_ids):
         node_file[r["id"]] = r["file_id"]
         node_parent[r["id"]] = r["parent_id"]
         node_name[r["id"]] = r["name"]
-        by_qname[r["qualified_name"]] = r["id"]
-        if r["kind"] in ("function", "method", "class", "variable"):
+
+    ref_kinds = {r["kind"] for r in refs}
+    by_name: dict[str, list[tuple]] = defaultdict(list)
+    by_qname: dict[str, int] = {}
+    if ref_kinds & {"CALLS", "REFERENCES", "INHERITS"}:
+        missing_parents: set[int] = set()
+        for r in conn.execute(
+            "SELECT id, file_id, kind, name, qualified_name, parent_id FROM nodes "
+            "WHERE kind IN ('function', 'method', 'class', 'variable')"
+        ):
+            node_file[r["id"]] = r["file_id"]
+            node_parent[r["id"]] = r["parent_id"]
+            node_name[r["id"]] = r["name"]
+            by_qname[r["qualified_name"]] = r["id"]
             by_name[r["name"]].append((r["id"], r["file_id"], r["kind"], r["parent_id"]))
+            if r["parent_id"] is not None:
+                missing_parents.add(r["parent_id"])
+        need_parents = sorted(pid for pid in missing_parents if pid not in node_name)
+        if need_parents:
+            for r in _by_ids("id, name", "id", need_parents):
+                node_name[r["id"]] = r["name"]
+        class_ref_files = sorted({
+            node_file[r["source_id"]] for r in refs
+            if r["kind"] == "REFERENCES" and r["qualifier"].startswith("class:") and r["source_id"] in node_file
+        })
+        if class_ref_files:
+            for r in _by_ids("id, qualified_name", "file_id", class_ref_files):
+                by_qname[r["qualified_name"]] = r["id"]
 
     # JSON records are link targets: a `target`/`way_id`/`area_from` value names a record
     # in the same file. Index them by display name and by the last segment of their path.
     record_by_file: dict[int, dict[str, list[int]]] = defaultdict(lambda: defaultdict(list))
-    for r in conn.execute("SELECT id, file_id, name, qualified_name FROM nodes WHERE kind = 'record'"):
-        keys = {r["name"].strip().lower()}
-        tail = r["qualified_name"].split("::", 1)[-1].rsplit("::", 1)[-1]
-        keys.add(tail.strip().lower())
-        for k in keys:
-            if k:
-                record_by_file[r["file_id"]][k].append(r["id"])
+    if "CONNECTS_TO" in ref_kinds:
+        connect_files = sorted({
+            node_file[r["source_id"]] for r in refs
+            if r["kind"] == "CONNECTS_TO" and r["source_id"] in node_file
+        })
+        for r in _by_ids("id, file_id, name, qualified_name", "file_id", connect_files, "AND kind = 'record'"):
+            keys = {r["name"].strip().lower()}
+            tail = r["qualified_name"].split("::", 1)[-1].rsplit("::", 1)[-1]
+            keys.add(tail.strip().lower())
+            for k in keys:
+                if k:
+                    record_by_file[r["file_id"]][k].append(r["id"])
 
-    # Markdown sections can be linked by heading name or anchor
+    # Markdown, structured text, and PDF sections can be linked by heading name or anchor.
     section_by_name: dict[str, list[int]] = defaultdict(list)
-    for r in conn.execute("SELECT id, name, qualified_name FROM nodes WHERE kind = 'section'"):
-        k = r["name"].strip().lower()
-        if k and k not in ("(intro)", "(text)"):
-            section_by_name[k].append(r["id"])
+    section_by_file: dict[int, list[tuple[str, int]]] = defaultdict(list)
+    if any(r["kind"] == "LINKS_TO" and r["qualifier"] in ("wiki", "section") for r in refs):
+        for r in conn.execute("SELECT id, file_id, name, signature FROM nodes WHERE kind = 'section'"):
+            sig = (r["signature"] or "").strip().lower()
+            if sig.startswith("page "):
+                continue
+            k = re.sub(r"\s+", " ", r["name"]).strip().lower()
+            if k and k not in ("(intro)", "(text)", "table of contents"):
+                section_by_name[k].append(r["id"])
+                section_by_file[r["file_id"]].append((k, r["id"]))
 
     out: list[tuple] = []
     counts: dict[str, int] = defaultdict(int)
@@ -377,7 +468,6 @@ def resolve(conn: sqlite3.Connection) -> dict:
 
     # ---- imports first: REFERENCES resolution needs the imported-file sets
     imported: dict[int, set[int]] = defaultdict(set)
-    refs = conn.execute("SELECT source_id, kind, target, qualifier, meta FROM refs ORDER BY id").fetchall()
     for r in refs:
         if r["kind"] != "IMPORTS":
             continue
@@ -478,6 +568,28 @@ def resolve(conn: sqlite3.Connection) -> dict:
                     sec_hits = [sid for sname, sids in section_by_name.items() if target_sec in sname for sid in sids]
                 for sid in sec_hits[:config.MAX_AMBIGUOUS_TARGETS]:
                     emit(src, sid, "LINKS_TO")
+            elif r["qualifier"] == "section":
+                target_sec = re.sub(r"\s+", " ", r["target"]).strip().lower()
+                if len(target_sec) >= 2:
+                    local_secs = section_by_file.get(src_file, ())
+                    hits = [nid for sname, nid in local_secs if sname == target_sec]
+                    if not hits:
+                        hits = [
+                            nid for sname, nid in local_secs
+                            if sname.startswith(target_sec + ":")
+                            or sname.startswith(target_sec + " ")
+                            or target_sec in sname
+                        ]
+                    if not hits:
+                        hits = section_by_name.get(target_sec, [])
+                    if not hits:
+                        hits = [
+                            sid for sname, sids in section_by_name.items()
+                            if sname.startswith(target_sec + ":") or sname.startswith(target_sec + " ")
+                            for sid in sids
+                        ]
+                    for sid in hits[:config.MAX_AMBIGUOUS_TARGETS]:
+                        emit(src, sid, "LINKS_TO", "section")
             else:
                 t = resolve_path(src_rel, r["target"]) if r["target"].startswith(("/", ".")) else None
                 if t is None:
@@ -522,12 +634,12 @@ def index(conn: sqlite3.Connection, root: Path | None = None, force: bool = Fals
 
     def _read_one(f: dict) -> tuple[dict, str | None]:
         """Return (file, None) or (file, skip-reason)."""
-        if f["language"] == "image":
+        if f["language"] in ("image", "pdf"):
             try:
                 raw = f["path"].read_bytes()
             except OSError:
                 return f, "unreadable"
-            f["text"] = ""                 # never decoded: images are embedded as pixels
+            f["text"] = ""                 # never UTF-8 decoded: images are pixels, PDFs are parsed per page
             f["hash"] = _hash_bytes(raw)
             return f, None
         text = _read(f["path"])
@@ -566,7 +678,8 @@ def index(conn: sqlite3.Connection, root: Path | None = None, force: bool = Fals
             prev = existing.get(f["rel"])
             if prev:
                 db.delete_file(conn, prev["id"])
-            _insert_file(conn, f, parsed[f["rel"]])
+            _insert_file(conn, f, parsed.pop(f["rel"]), progress=progress)
+            f.pop("text", None)
             if i % 250 == 0:
                 rate = i / max(time.time() - t_parse, 1e-6)
                 progress(f"  storing: {i}/{len(changed)} files ({rate:.0f}/s)")
@@ -576,6 +689,7 @@ def index(conn: sqlite3.Connection, root: Path | None = None, force: bool = Fals
     if changed or removed or force:
         counts = resolve(conn)
         progress(f"resolved edges: {counts}")
+        db.bump_vec_generation(conn)
     db.set_meta(conn, "indexed_at", time.strftime("%Y-%m-%dT%H:%M:%S"))
     conn.commit()
     return {"files": len(files), "changed": len(changed), "unchanged": unchanged,

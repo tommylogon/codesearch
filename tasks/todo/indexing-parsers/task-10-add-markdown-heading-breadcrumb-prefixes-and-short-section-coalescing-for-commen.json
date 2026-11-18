@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "id": "task-10",
+  "kind": "task",
+  "number": 10,
+  "title": "Add Markdown heading breadcrumb prefixes and short-section coalescing for comment embeddings",
+  "status": "todo",
+  "priority": "medium",
+  "area": "indexing-parsers",
+  "tags": [
+    "markdown",
+    "parsers",
+    "embeddings"
+  ],
+  "created": "2026-11-17",
+  "updated": "2026-11-17",
+  "horizon": "next",
+  "effort": "",
+  "goal": "",
+  "relations": {
+    "blocks": [],
+    "blocked_by": [],
+    "depends_on": [],
+    "related": [],
+    "parent": null,
+    "children": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "invalidates": [],
+    "invalidated_by": []
+  },
+  "sections": {
+    "what": "Prepend full file + heading breadcrumb path to every Markdown section embedded comment text, and coalesce direct ### child summaries (up to ~350 tokens) into thin parent ## sections (< 60 tokens).",
+    "why": "Markdown comment chunks have a median length of 21.5 tokens (86 chars), causing child subsections to lose parent framing and thin parent sections to embed poorly.",
+    "how": "",
+    "verify": "Run pytest tests/test_codesearch_parsers.py verifying breadcrumb prefixes and parent-child coalescing.",
+    "acceptance": [
+      {
+        "text": "Every Markdown section embedded comment text starts with its full document + heading breadcrumb path.",
+        "done": false
+      },
+      {
+        "text": "Short parent ## sections (< 60 tokens) with ### children fold direct child summaries (up to ~350 tokens) into the parent comment vector.",
+        "done": false
+      },
+      {
+        "text": "Parser and embedding tests verify breadcrumb prefixes and coalesced parent comment text.",
+        "done": false
+      }
+    ],
+    "files": [
+      "src/codesearch/parsers/md_parser.py",
+      "src/codesearch/embedder.py",
+      "tests/test_codesearch_parsers.py"
+    ],
+    "custom": {}
+  },
+  "links": {
+    "wiki": [],
+    "docs": [],
+    "commits": [],
+    "urls": []
+  },
+  "evidence": [],
+  "invalidation": null,
+  "extra": {}
+}

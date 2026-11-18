@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "id": "task-6",
+  "kind": "task",
+  "number": 6,
+  "title": "Surface raw max cosine sim on hits and add not_path exclusion filter to search_code",
+  "status": "done",
+  "priority": "high",
+  "area": "search",
+  "tags": [
+    "mcp",
+    "search-code",
+    "path-filter"
+  ],
+  "created": "2026-11-17",
+  "updated": "2026-11-17",
+  "horizon": "now",
+  "effort": "",
+  "goal": "",
+  "relations": {
+    "blocks": [],
+    "blocked_by": [],
+    "depends_on": [],
+    "related": [],
+    "parent": null,
+    "children": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "invalidates": [],
+    "invalidated_by": []
+  },
+  "sections": {
+    "what": "Surface raw best cosine similarity (`sim`) alongside RRF `score` in _compact() / search results, and add `not_path: str | list[str] | None` (`AND f.rel_path NOT LIKE ?`) across keyword and semantic filtering.",
+    "why": "RRF score alone hides whether cosine similarity was 0.88 or 0.46, and not_terms cannot reliably exclude path prefixes like dev_tasks/ because split_words tokenizes underscores.",
+    "how": "",
+    "verify": "Run pytest tests/test_codesearch_db.py verifying sim field and not_path filtering.",
+    "acceptance": [
+      {
+        "text": "Every search_code hit includes sim (raw best cosine similarity across vec:* lists, or null when keyword-only).",
+        "done": true
+      },
+      {
+        "text": "search_code and Searcher.search support not_path (str | list[str]) filtering out matching rel_path prefixes/substrings in both FTS and semantic allowed checks.",
+        "done": true
+      },
+      {
+        "text": "Unit tests verify sim surfacing and not_path exclusion for paths like dev_tasks/ and tests/.",
+        "done": true
+      }
+    ],
+    "files": [
+      "src/codesearch/search.py",
+      "src/codesearch/mcp_server.py",
+      "tests/test_codesearch_db.py"
+    ],
+    "custom": {}
+  },
+  "links": {
+    "wiki": [],
+    "docs": [],
+    "commits": [],
+    "urls": []
+  },
+  "evidence": [
+    "Surfaced raw max cosine `sim` on materialized hits in src/codesearch/search.py and `_compact()` in src/codesearch/mcp_server.py.",
+    "Added `not_path: str | list[str] | None` exclusion filter across Searcher.search(), Searcher.keyword(), Searcher._allowed(), Searcher._filters(), and search_code().",
+    "Verified with `pytest` (59 passed, including test_sim_not_path_cosine_margin_and_block_downweight)."
+  ],
+  "invalidation": null,
+  "extra": {},
+  "history": [
+    {
+      "from": "todo",
+      "to": "inprogress",
+      "at": "2026-11-17T21:41:25Z"
+    },
+    {
+      "from": "inprogress",
+      "to": "done",
+      "at": "2026-11-17T21:43:48Z"
+    }
+  ]
+}
